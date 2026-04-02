@@ -1,0 +1,1674 @@
+(function () {
+  "use strict";
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function clonePoint(point) {
+  return { x: point.x, y: point.y };
+}
+
+function clonePoints(points) {
+  return points.map(clonePoint);
+}
+
+function distance(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function polylineLength(points) {
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    total += distance(points[index - 1], points[index]);
+  }
+  return total;
+}
+
+function linearInterpolate(start, end, samples) {
+  const output = [];
+
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    output.push({
+      x: start.x + (end.x - start.x) * t,
+      y: start.y + (end.y - start.y) * t,
+    });
+  }
+
+  return output;
+}
+
+function catmullRomSpline(points, samplesPerSegment = 25) {
+  if (points.length < 2) return clonePoints(points);
+  if (points.length === 2) {
+    return linearInterpolate(points[0], points[1], samplesPerSegment);
+  }
+
+  const result = [];
+
+  for (let segmentIndex = 0; segmentIndex < points.length - 1; segmentIndex += 1) {
+    const p0 = points[Math.max(0, segmentIndex - 1)];
+    const p1 = points[segmentIndex];
+    const p2 = points[segmentIndex + 1];
+    const p3 = points[Math.min(points.length - 1, segmentIndex + 2)];
+
+    for (let sampleIndex = 0; sampleIndex < samplesPerSegment; sampleIndex += 1) {
+      const t = sampleIndex / samplesPerSegment;
+      const t2 = t * t;
+      const t3 = t2 * t;
+
+      result.push({
+        x:
+          0.5 *
+          (2 * p1.x +
+            (-p0.x + p2.x) * t +
+            (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y:
+          0.5 *
+          (2 * p1.y +
+            (-p0.y + p2.y) * t +
+            (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+            (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+
+  result.push(clonePoint(points[points.length - 1]));
+  return result;
+}
+
+function smoothPolyline(points, radius = 2, passes = 2) {
+  if (points.length < 3) return clonePoints(points);
+
+  let current = clonePoints(points);
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    current = current.map((point, index) => {
+      if (index === 0 || index === current.length - 1) return clonePoint(point);
+
+      const start = Math.max(0, index - radius);
+      const end = Math.min(current.length - 1, index + radius);
+
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+
+      for (let cursor = start; cursor <= end; cursor += 1) {
+        sumX += current[cursor].x;
+        sumY += current[cursor].y;
+        count += 1;
+      }
+
+      return {
+        x: sumX / count,
+        y: sumY / count,
+      };
+    });
+  }
+
+  return current;
+}
+
+function resamplePolyline(points, sampleCount) {
+  if (points.length <= sampleCount) return clonePoints(points);
+  if (points.length < 2 || sampleCount < 2) return clonePoints(points);
+
+  const cumulativeDistances = [0];
+
+  for (let index = 1; index < points.length; index += 1) {
+    cumulativeDistances.push(
+      cumulativeDistances[index - 1] + distance(points[index - 1], points[index]),
+    );
+  }
+
+  const totalLength = cumulativeDistances[cumulativeDistances.length - 1];
+  if (totalLength === 0) return clonePoints(points.slice(0, sampleCount));
+
+  const sampled = [clonePoint(points[0])];
+  let distanceCursor = 1;
+
+  for (let sampleIndex = 1; sampleIndex < sampleCount - 1; sampleIndex += 1) {
+    const targetDistance = (totalLength * sampleIndex) / (sampleCount - 1);
+
+    while (
+      distanceCursor < cumulativeDistances.length - 1 &&
+      cumulativeDistances[distanceCursor] < targetDistance
+    ) {
+      distanceCursor += 1;
+    }
+
+    const previousDistance = cumulativeDistances[distanceCursor - 1];
+    const nextDistance = cumulativeDistances[distanceCursor];
+    const span = nextDistance - previousDistance || 1;
+    const t = (targetDistance - previousDistance) / span;
+    const a = points[distanceCursor - 1];
+    const b = points[distanceCursor];
+
+    sampled.push({
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+    });
+  }
+
+  sampled.push(clonePoint(points[points.length - 1]));
+  return sampled;
+}
+
+function curvature(a, b, c) {
+  const dx1 = b.x - a.x;
+  const dy1 = b.y - a.y;
+  const dx2 = c.x - b.x;
+  const dy2 = c.y - b.y;
+  const cross = Math.abs(dx1 * dy2 - dy1 * dx2);
+  const denominator = Math.pow(dx1 * dx1 + dy1 * dy1, 1.5);
+
+  return denominator === 0 ? 0 : cross / denominator;
+}
+
+
+class AppState {
+  constructor() {
+    this.imageWidth = 0;
+    this.imageHeight = 0;
+    this.originalImage = null;
+    this.detectedTrackPoints = [];
+    this.userPoints = [];
+    this.smoothPath = [];
+    this.optimizedPath = [];
+    this.apexPoint = null;
+    this.speedProfile = [];
+    this.segmentTypes = [];
+    this.minSpeed = null;
+    this.carIndex = 0;
+    this.carSubstep = 0;
+    this.autoGeneratedPath = false;
+  }
+
+  setImage({ imageData, width, height }) {
+    this.imageWidth = width;
+    this.imageHeight = height;
+    this.originalImage = imageData;
+    this.clearAllTrackData();
+  }
+
+  clearAllTrackData() {
+    this.detectedTrackPoints = [];
+    this.userPoints = [];
+    this.clearComputedData();
+    this.autoGeneratedPath = false;
+  }
+
+  clearComputedData() {
+    this.smoothPath = [];
+    this.optimizedPath = [];
+    this.apexPoint = null;
+    this.speedProfile = [];
+    this.segmentTypes = [];
+    this.minSpeed = null;
+    this.resetCar();
+  }
+
+  clearDetectedTrack() {
+    this.detectedTrackPoints = [];
+  }
+
+  setDetectedTrack(points) {
+    this.detectedTrackPoints = clonePoints(points);
+  }
+
+  setUserPoints(points, { autoGenerated = false } = {}) {
+    this.userPoints = clonePoints(points);
+    this.autoGeneratedPath = autoGenerated;
+    this.clearComputedData();
+  }
+
+  addUserPoint(point) {
+    this.userPoints.push(clonePoint(point));
+    this.autoGeneratedPath = false;
+    this.clearComputedData();
+  }
+
+  removeLastUserPoint() {
+    if (!this.userPoints.length) return false;
+    this.userPoints.pop();
+    this.autoGeneratedPath = false;
+    this.clearComputedData();
+    return true;
+  }
+
+  setGeneratedPaths({ smoothPath, optimizedPath }) {
+    this.smoothPath = clonePoints(smoothPath);
+    this.optimizedPath = clonePoints(optimizedPath);
+    this.resetCar();
+  }
+
+  setAnalysis({ speedProfile, segmentTypes, apexPoint, minSpeed }) {
+    this.speedProfile = [...speedProfile];
+    this.segmentTypes = [...segmentTypes];
+    this.apexPoint = apexPoint ? clonePoint(apexPoint) : null;
+    this.minSpeed = minSpeed;
+  }
+
+  getActivePath() {
+    return this.optimizedPath.length > 1 ? this.optimizedPath : this.smoothPath;
+  }
+
+  resetCar() {
+    this.carIndex = 0;
+    this.carSubstep = 0;
+  }
+}
+
+class CanvasRenderer {
+  constructor({ canvas, lineCanvas, resultCanvas }) {
+    this.canvas = canvas;
+    this.lineCanvas = lineCanvas;
+    this.resultCanvas = resultCanvas;
+    this.mainContext = canvas.getContext("2d");
+    this.lineContext = lineCanvas.getContext("2d");
+    this.resultContext = resultCanvas.getContext("2d");
+  }
+
+  resize(width, height) {
+    for (const target of [this.canvas, this.lineCanvas, this.resultCanvas]) {
+      target.width = width;
+      target.height = height;
+    }
+  }
+
+  render(state) {
+    this.drawMainCanvas(state);
+    this.drawLineCanvas(state);
+    this.drawResultCanvas(state);
+  }
+
+  drawMainCanvas(state) {
+    this.drawImageLayer(this.mainContext, this.canvas, state.originalImage);
+    this.drawDetectedTrack(this.mainContext, state.detectedTrackPoints);
+    this.drawPath(this.mainContext, state.getActivePath(), "#ff00aa", 4);
+    this.drawControlPoints(this.mainContext, state.userPoints);
+    this.drawApex(this.mainContext, state.apexPoint);
+    this.drawCar(this.mainContext, state);
+  }
+
+  drawLineCanvas(state) {
+    this.drawImageLayer(this.lineContext, this.lineCanvas, state.originalImage);
+    this.drawPath(this.lineContext, state.getActivePath(), "#ff00aa", 4);
+    this.drawApex(this.lineContext, state.apexPoint);
+    this.drawCar(this.lineContext, state);
+  }
+
+  drawResultCanvas(state) {
+    this.drawImageLayer(this.resultContext, this.resultCanvas, state.originalImage);
+    this.drawSegmentedPath(
+      this.resultContext,
+      state.getActivePath(),
+      state.segmentTypes,
+    );
+    this.drawCar(this.resultContext, state);
+  }
+
+  drawImageLayer(context, canvas, imageData) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (imageData) {
+      context.putImageData(imageData, 0, 0);
+      return;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  drawDetectedTrack(context, points) {
+    if (!points.length) return;
+
+    context.save();
+    context.strokeStyle = "rgba(0, 188, 212, 0.75)";
+    context.lineWidth = 2.5;
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+
+    for (let index = 1; index < points.length; index += 1) {
+      context.lineTo(points[index].x, points[index].y);
+    }
+
+    context.stroke();
+
+    const radius = points.length > 60 ? 2.5 : points.length > 24 ? 3 : 4;
+    context.fillStyle = "#00bcd4";
+
+    for (const point of points) {
+      context.beginPath();
+      context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    context.restore();
+  }
+
+  drawControlPoints(context, points) {
+    if (!points.length) return;
+
+    context.save();
+    context.strokeStyle = "#32d74b";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+
+    for (let index = 1; index < points.length; index += 1) {
+      context.lineTo(points[index].x, points[index].y);
+    }
+
+    context.stroke();
+    context.fillStyle = "#ef4444";
+
+    points.forEach((point, index) => {
+      context.beginPath();
+      context.arc(point.x, point.y, index === 0 ? 5 : 4, 0, Math.PI * 2);
+      context.fill();
+    });
+
+    context.restore();
+  }
+
+  drawPath(context, path, strokeStyle, lineWidth) {
+    if (path.length < 2) return;
+
+    context.save();
+    context.strokeStyle = strokeStyle;
+    context.lineWidth = lineWidth;
+    context.beginPath();
+    context.moveTo(path[0].x, path[0].y);
+
+    for (let index = 1; index < path.length; index += 1) {
+      context.lineTo(path[index].x, path[index].y);
+    }
+
+    context.stroke();
+    context.restore();
+  }
+
+  drawSegmentedPath(context, path, segmentTypes) {
+    if (path.length < 2 || segmentTypes.length !== path.length - 1) return;
+
+    context.save();
+    context.lineWidth = 5;
+
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const segmentType = segmentTypes[index];
+      context.strokeStyle =
+        segmentType === "accelerate"
+          ? "#2e7d32"
+          : segmentType === "brake"
+            ? "#c62828"
+            : "#f9a825";
+
+      context.beginPath();
+      context.moveTo(path[index].x, path[index].y);
+      context.lineTo(path[index + 1].x, path[index + 1].y);
+      context.stroke();
+    }
+
+    context.restore();
+  }
+
+  drawApex(context, apexPoint) {
+    if (!apexPoint) return;
+
+    context.save();
+    context.fillStyle = "#1565c0";
+    context.beginPath();
+    context.arc(apexPoint.x, apexPoint.y, 6, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
+  drawCar(context, state) {
+    const activePath = state.getActivePath();
+    if (!activePath.length) return;
+
+    const currentIndex = Math.min(state.carIndex, activePath.length - 1);
+    const currentPoint = activePath[currentIndex];
+    let carPoint = currentPoint;
+
+    if (currentIndex < activePath.length - 1) {
+      const nextPoint = activePath[currentIndex + 1];
+      carPoint = {
+        x: currentPoint.x + (nextPoint.x - currentPoint.x) * state.carSubstep,
+        y: currentPoint.y + (nextPoint.y - currentPoint.y) * state.carSubstep,
+      };
+    }
+
+    context.save();
+    context.fillStyle = "#111827";
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(carPoint.x, carPoint.y, 7, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.restore();
+  }
+}
+
+
+const NEIGHBOR_OFFSETS = [
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+  [-1, 0],
+  [1, 0],
+  [-1, 1],
+  [0, 1],
+  [1, 1],
+];
+
+class TrackDetectionService {
+  isReady() {
+    return Boolean(globalThis.cvReady && globalThis.cv);
+  }
+
+  detect(sourceCanvas) {
+    if (!this.isReady()) {
+      throw new Error("OpenCV.js is not ready yet.");
+    }
+
+    const cv = globalThis.cv;
+    const src = cv.imread(sourceCanvas);
+    const gray = new cv.Mat();
+    const blurred = new cv.Mat();
+    const binaryInverse = new cv.Mat();
+    const binary = new cv.Mat();
+    const contours = new cv.MatVector();
+    const hierarchy = new cv.Mat();
+    let filledMask = null;
+    let maskRoi = null;
+
+    try {
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+      cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0);
+      cv.threshold(
+        blurred,
+        binaryInverse,
+        0,
+        255,
+        cv.THRESH_BINARY_INV + cv.THRESH_OTSU,
+      );
+
+      const kernel = cv.getStructuringElement(
+        cv.MORPH_RECT,
+        new cv.Size(5, 5),
+      );
+      cv.morphologyEx(binaryInverse, binary, cv.MORPH_CLOSE, kernel);
+      cv.morphologyEx(binary, binary, cv.MORPH_OPEN, kernel);
+      kernel.delete();
+
+      cv.findContours(
+        binary,
+        contours,
+        hierarchy,
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_NONE,
+      );
+
+      if (contours.size() === 0) {
+        throw new Error("No thick track-like contour was found.");
+      }
+
+      const bestContourIndex = this.findBestContourIndex(contours, src);
+
+      if (bestContourIndex === -1) {
+        throw new Error("Could not choose the strongest track contour.");
+      }
+
+      const contour = contours.get(bestContourIndex);
+      const rect = cv.boundingRect(contour);
+      const padding = 14;
+      const roiX = Math.max(0, rect.x - padding);
+      const roiY = Math.max(0, rect.y - padding);
+      const roiWidth = Math.min(src.cols - roiX, rect.width + padding * 2);
+      const roiHeight = Math.min(src.rows - roiY, rect.height + padding * 2);
+
+      filledMask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+      cv.drawContours(
+        filledMask,
+        contours,
+        bestContourIndex,
+        new cv.Scalar(255),
+        -1,
+      );
+
+      maskRoi = filledMask
+        .roi(new cv.Rect(roiX, roiY, roiWidth, roiHeight))
+        .clone();
+
+      const trackPoints = this.extractCenterline(maskRoi, roiX, roiY);
+
+      if (trackPoints.length < 8) {
+        throw new Error("Could not extract a long enough centerline.");
+      }
+
+      return { trackPoints };
+    } finally {
+      src.delete();
+      gray.delete();
+      blurred.delete();
+      binaryInverse.delete();
+      binary.delete();
+      contours.delete();
+      hierarchy.delete();
+      if (filledMask) filledMask.delete();
+      if (maskRoi) maskRoi.delete();
+    }
+  }
+
+  findBestContourIndex(contours, src) {
+    const cv = globalThis.cv;
+    const imageArea = src.rows * src.cols;
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+
+    for (let index = 0; index < contours.size(); index += 1) {
+      const contour = contours.get(index);
+      const area = cv.contourArea(contour);
+      if (area < imageArea * 0.002) continue;
+
+      const rect = cv.boundingRect(contour);
+      const perimeter = cv.arcLength(contour, true);
+      if (perimeter <= 0) continue;
+
+      const thicknessScore = area / perimeter;
+      const boxArea = rect.width * rect.height;
+      const fillRatio = boxArea > 0 ? area / boxArea : 0;
+      const score = area + thicknessScore * 1200 + fillRatio * 5000;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    return bestIndex;
+  }
+
+  extractCenterline(mask, offsetX, offsetY) {
+    const skeleton = this.skeletonizeBinary(mask);
+
+    try {
+      let pixels = this.collectSkeletonPixels(skeleton, offsetX, offsetY);
+      if (pixels.length < 2) return [];
+
+      let graph = this.buildNeighborGraph(pixels);
+      ({ points: pixels, graph } = this.pruneShortBranches(pixels, graph));
+
+      const orderedPath = this.hasEndpoints(graph)
+        ? this.extractLongestOpenPath(pixels, graph)
+        : this.traceLoopPath(pixels, graph);
+
+      if (orderedPath.length < 2) return [];
+
+      const smoothed = smoothPolyline(orderedPath, 2, 2);
+      const totalLength = polylineLength(smoothed);
+      const sampleCount = clamp(Math.round(totalLength / 14), 28, 160);
+
+      return resamplePolyline(smoothed, sampleCount);
+    } finally {
+      skeleton.delete();
+    }
+  }
+
+  skeletonizeBinary(mask) {
+    const cv = globalThis.cv;
+    const working = mask.clone();
+    const skeleton = cv.Mat.zeros(mask.rows, mask.cols, cv.CV_8UC1);
+    const eroded = new cv.Mat();
+    const opened = new cv.Mat();
+    const residue = new cv.Mat();
+    const kernel = cv.getStructuringElement(cv.MORPH_CROSS, new cv.Size(3, 3));
+
+    try {
+      while (cv.countNonZero(working) > 0) {
+        cv.erode(working, eroded, kernel);
+        cv.dilate(eroded, opened, kernel);
+        cv.subtract(working, opened, residue);
+        cv.bitwise_or(skeleton, residue, skeleton);
+        eroded.copyTo(working);
+      }
+
+      return skeleton;
+    } finally {
+      working.delete();
+      eroded.delete();
+      opened.delete();
+      residue.delete();
+      kernel.delete();
+    }
+  }
+
+  collectSkeletonPixels(skeleton, offsetX, offsetY) {
+    const pixels = [];
+
+    for (let y = 0; y < skeleton.rows; y += 1) {
+      for (let x = 0; x < skeleton.cols; x += 1) {
+        if (skeleton.ucharPtr(y, x)[0] > 0) {
+          pixels.push({ x: x + offsetX, y: y + offsetY });
+        }
+      }
+    }
+
+    return pixels;
+  }
+
+  buildNeighborGraph(points) {
+    const pointIndexByKey = new Map();
+
+    points.forEach((point, index) => {
+      pointIndexByKey.set(`${point.x},${point.y}`, index);
+    });
+
+    return points.map((point) => {
+      const neighbors = [];
+
+      for (const [dx, dy] of NEIGHBOR_OFFSETS) {
+        const neighborIndex = pointIndexByKey.get(
+          `${point.x + dx},${point.y + dy}`,
+        );
+        if (neighborIndex !== undefined) neighbors.push(neighborIndex);
+      }
+
+      return neighbors;
+    });
+  }
+
+  pruneShortBranches(points, graph, maxBranchLength = 20) {
+    const removed = new Set();
+    let changed = true;
+
+    const getActiveNeighbors = (index) =>
+      graph[index].filter((neighborIndex) => !removed.has(neighborIndex));
+
+    while (changed) {
+      changed = false;
+
+      for (let startIndex = 0; startIndex < points.length; startIndex += 1) {
+        if (removed.has(startIndex)) continue;
+        if (getActiveNeighbors(startIndex).length !== 1) continue;
+
+        const branch = [startIndex];
+        let branchLength = 0;
+        let previousIndex = -1;
+        let currentIndex = startIndex;
+        let reachedJunction = false;
+
+        while (true) {
+          const options = getActiveNeighbors(currentIndex).filter(
+            (neighborIndex) => neighborIndex !== previousIndex,
+          );
+
+          if (!options.length) break;
+
+          const nextIndex = options[0];
+          branchLength += distance(points[currentIndex], points[nextIndex]);
+          branch.push(nextIndex);
+          previousIndex = currentIndex;
+          currentIndex = nextIndex;
+
+          const degree = getActiveNeighbors(currentIndex).length;
+
+          if (degree === 1) {
+            reachedJunction = false;
+            break;
+          }
+
+          if (degree > 2) {
+            reachedJunction = true;
+            break;
+          }
+        }
+
+        if (reachedJunction && branchLength <= maxBranchLength) {
+          for (const branchIndex of branch.slice(0, -1)) {
+            removed.add(branchIndex);
+          }
+          changed = true;
+        }
+      }
+    }
+
+    const activePoints = [];
+    const remappedIndexes = new Map();
+
+    points.forEach((point, index) => {
+      if (removed.has(index)) return;
+      remappedIndexes.set(index, activePoints.length);
+      activePoints.push(point);
+    });
+
+    const activeGraph = activePoints.map(() => []);
+
+    graph.forEach((neighbors, originalIndex) => {
+      if (removed.has(originalIndex)) return;
+
+      const mappedIndex = remappedIndexes.get(originalIndex);
+      activeGraph[mappedIndex] = neighbors
+        .filter((neighborIndex) => !removed.has(neighborIndex))
+        .map((neighborIndex) => remappedIndexes.get(neighborIndex));
+    });
+
+    return { points: activePoints, graph: activeGraph };
+  }
+
+  hasEndpoints(graph) {
+    return graph.some((neighbors) => neighbors.length === 1);
+  }
+
+  extractLongestOpenPath(points, graph) {
+    const startIndex = graph.findIndex((neighbors) => neighbors.length === 1);
+    if (startIndex === -1) return [];
+
+    const firstPass = this.findFarthestNode(startIndex, graph);
+    const secondPass = this.findFarthestNode(firstPass.index, graph);
+    const orderedIndexes = [];
+
+    let cursor = secondPass.index;
+
+    while (cursor !== -1) {
+      orderedIndexes.push(cursor);
+      if (cursor === firstPass.index) break;
+      cursor = secondPass.parent[cursor];
+    }
+
+    orderedIndexes.reverse();
+    return orderedIndexes.map((index) => points[index]);
+  }
+
+  findFarthestNode(startIndex, graph) {
+    const queue = new Int32Array(graph.length);
+    const visited = new Int8Array(graph.length);
+    const parent = new Int32Array(graph.length);
+    parent.fill(-1);
+
+    let head = 0;
+    let tail = 0;
+    let farthestIndex = startIndex;
+
+    queue[tail] = startIndex;
+    tail += 1;
+    visited[startIndex] = 1;
+
+    while (head < tail) {
+      const currentIndex = queue[head];
+      head += 1;
+      farthestIndex = currentIndex;
+
+      for (const neighborIndex of graph[currentIndex]) {
+        if (visited[neighborIndex]) continue;
+        visited[neighborIndex] = 1;
+        parent[neighborIndex] = currentIndex;
+        queue[tail] = neighborIndex;
+        tail += 1;
+      }
+    }
+
+    return { index: farthestIndex, parent };
+  }
+
+  traceLoopPath(points, graph) {
+    if (!points.length) return [];
+
+    let startIndex = 0;
+
+    for (let index = 1; index < points.length; index += 1) {
+      if (
+        points[index].x < points[startIndex].x ||
+        (points[index].x === points[startIndex].x &&
+          points[index].y < points[startIndex].y)
+      ) {
+        startIndex = index;
+      }
+    }
+
+    const orderedIndexes = [startIndex];
+    const visitedEdges = new Set();
+    let previousIndex = -1;
+    let currentIndex = startIndex;
+
+    while (true) {
+      const candidates = graph[currentIndex].filter(
+        (neighborIndex) =>
+          !visitedEdges.has(this.getEdgeKey(currentIndex, neighborIndex)),
+      );
+
+      if (!candidates.length) break;
+
+      const nextIndex = this.chooseBestNextIndex(
+        points,
+        previousIndex,
+        currentIndex,
+        candidates,
+      );
+
+      visitedEdges.add(this.getEdgeKey(currentIndex, nextIndex));
+
+      if (nextIndex === startIndex) break;
+
+      orderedIndexes.push(nextIndex);
+      previousIndex = currentIndex;
+      currentIndex = nextIndex;
+
+      if (orderedIndexes.length > points.length + 1) break;
+    }
+
+    return orderedIndexes.map((index) => points[index]);
+  }
+
+  chooseBestNextIndex(points, previousIndex, currentIndex, candidates) {
+    if (candidates.length === 1) return candidates[0];
+
+    if (previousIndex === -1) {
+      return [...candidates].sort((leftIndex, rightIndex) => {
+        const left = points[leftIndex];
+        const right = points[rightIndex];
+        if (left.y !== right.y) return left.y - right.y;
+        return left.x - right.x;
+      })[0];
+    }
+
+    const currentPoint = points[currentIndex];
+    const previousPoint = points[previousIndex];
+    const inputVector = {
+      x: currentPoint.x - previousPoint.x,
+      y: currentPoint.y - previousPoint.y,
+    };
+    const inputLength = Math.hypot(inputVector.x, inputVector.y) || 1;
+
+    let bestIndex = candidates[0];
+    let bestScore = -Infinity;
+
+    for (const candidateIndex of candidates) {
+      const candidatePoint = points[candidateIndex];
+      const outputVector = {
+        x: candidatePoint.x - currentPoint.x,
+        y: candidatePoint.y - currentPoint.y,
+      };
+      const outputLength = Math.hypot(outputVector.x, outputVector.y) || 1;
+      const score =
+        (inputVector.x * outputVector.x + inputVector.y * outputVector.y) /
+        (inputLength * outputLength);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = candidateIndex;
+      }
+    }
+
+    return bestIndex;
+  }
+
+  getEdgeKey(a, b) {
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+  }
+}
+
+
+class PathPlanningService {
+  createControlPointsFromDetectedTrack(trackPoints) {
+    if (trackPoints.length < 3) return clonePoints(trackPoints);
+
+    const smoothedTrack = smoothPolyline(trackPoints, 2, 2);
+    const totalLength = polylineLength(smoothedTrack);
+    const controlCount = clamp(Math.round(totalLength / 60), 10, 28);
+
+    return resamplePolyline(smoothedTrack, controlCount);
+  }
+
+  buildPaths(controlPoints, vehicleConfig) {
+    if (controlPoints.length < 2) {
+      return {
+        smoothPath: clonePoints(controlPoints),
+        optimizedPath: [],
+      };
+    }
+
+    const smoothPath = catmullRomSpline(controlPoints, 30);
+    const optimizedControls = this.buildOptimizedControlPoints(
+      controlPoints,
+      vehicleConfig,
+    );
+    const optimizedPath = catmullRomSpline(optimizedControls, 30);
+
+    return { smoothPath, optimizedPath };
+  }
+
+  buildOptimizedControlPoints(points, vehicleConfig) {
+    if (points.length < 3) return clonePoints(points);
+
+    const optimized = clonePoints(points);
+
+    let apexSeed = 1;
+    let maxCurvature = -1;
+
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const candidateCurvature = curvature(
+        points[index - 1],
+        points[index],
+        points[index + 1],
+      );
+
+      if (candidateCurvature > maxCurvature) {
+        maxCurvature = candidateCurvature;
+        apexSeed = index;
+      }
+    }
+
+    const speedBias = clamp(
+      (vehicleConfig.initialSpeed - 130) / 120,
+      -0.35,
+      0.6,
+    );
+    const brakeBias = clamp((8 - vehicleConfig.brakePower) / 8, -0.45, 0.65);
+    const accelBias = clamp((vehicleConfig.accelPower - 5) / 5, -0.45, 0.55);
+    const gripBias = clamp(
+      (1.2 - vehicleConfig.effectiveMu) / 1.2,
+      -0.55,
+      0.65,
+    );
+    const aeroBias = clamp(
+      (0.005 - vehicleConfig.downforce) / 0.005,
+      -0.45,
+      0.45,
+    );
+
+    const apexShift = clamp(
+      0.14 * speedBias +
+        0.2 * brakeBias +
+        0.16 * accelBias +
+        0.16 * gripBias +
+        0.08 * aeroBias,
+      -0.3,
+      0.4,
+    );
+
+    const apexPosition = clamp(apexSeed + apexShift, 1, points.length - 2);
+    const inwardStrength = clamp(
+      5 +
+        6 * (1 - Math.min(vehicleConfig.effectiveMu / 1.4, 1.2)) +
+        3 * Math.max(speedBias, 0),
+      2.5,
+      10,
+    );
+    const tangentStrength = clamp(3.5 * apexShift, -2.5, 3.5);
+
+    for (let index = 1; index < optimized.length - 1; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const next = points[index + 1];
+
+      const tangent = {
+        x: next.x - previous.x,
+        y: next.y - previous.y,
+      };
+      const tangentLength = Math.hypot(tangent.x, tangent.y) || 1;
+      const tangentX = tangent.x / tangentLength;
+      const tangentY = tangent.y / tangentLength;
+
+      const cross =
+        (current.x - previous.x) * (next.y - current.y) -
+        (current.y - previous.y) * (next.x - current.x);
+
+      const normalX = cross >= 0 ? -tangentY : tangentY;
+      const normalY = cross >= 0 ? tangentX : -tangentX;
+      const distanceFromApex = index - apexPosition;
+      const coreWeight = Math.exp(
+        -(distanceFromApex * distanceFromApex) / 1.0,
+      );
+      const entryWeight =
+        index < apexPosition
+          ? Math.exp(-(distanceFromApex * distanceFromApex) / 2.7)
+          : 0;
+      const exitWeight =
+        index > apexPosition
+          ? Math.exp(-(distanceFromApex * distanceFromApex) / 2.7)
+          : 0;
+      const inwardOffset = inwardStrength * coreWeight;
+      const alongOffset = tangentStrength * coreWeight;
+      const widenOffset =
+        3.2 *
+        (entryWeight + exitWeight) *
+        (0.55 + Math.max(accelBias, 0) * 0.45);
+
+      optimized[index] = {
+        x:
+          current.x +
+          normalX * inwardOffset -
+          normalX * widenOffset +
+          tangentX * alongOffset,
+        y:
+          current.y +
+          normalY * inwardOffset -
+          normalY * widenOffset +
+          tangentY * alongOffset,
+      };
+    }
+
+    let smoothed = clonePoints(optimized);
+
+    for (let pass = 0; pass < 2; pass += 1) {
+      for (let index = 1; index < smoothed.length - 1; index += 1) {
+        smoothed[index] = {
+          x:
+            0.2 * optimized[index - 1].x +
+            0.6 * optimized[index].x +
+            0.2 * optimized[index + 1].x,
+          y:
+            0.2 * optimized[index - 1].y +
+            0.6 * optimized[index].y +
+            0.2 * optimized[index + 1].y,
+        };
+      }
+
+      for (let index = 1; index < smoothed.length - 1; index += 1) {
+        optimized[index] = { ...smoothed[index] };
+      }
+    }
+
+    optimized[0] = { ...points[0] };
+    optimized[optimized.length - 1] = { ...points[points.length - 1] };
+
+    return optimized;
+  }
+}
+
+
+class PathAnalysisService {
+  analyze(path, vehicleConfig) {
+    if (path.length < 3) {
+      return {
+        speedProfile: [],
+        segmentTypes: [],
+        apexPoint: null,
+        minSpeed: null,
+      };
+    }
+
+    const limitProfile = path.map((point, index) => {
+      if (index === 0 || index === path.length - 1) {
+        return vehicleConfig.initialSpeed;
+      }
+
+      return this.getLateralSpeedLimit(
+        curvature(path[index - 1], point, path[index + 1]),
+        vehicleConfig,
+      );
+    });
+
+    const speedProfile = new Array(path.length).fill(vehicleConfig.initialSpeed);
+    speedProfile[0] = Math.min(vehicleConfig.initialSpeed, limitProfile[0]);
+
+    for (let index = 1; index < path.length; index += 1) {
+      const previousSpeed = speedProfile[index - 1];
+      const possibleSpeed = Math.max(0, previousSpeed - vehicleConfig.brakePower);
+
+      speedProfile[index] = Math.min(
+        limitProfile[index],
+        previousSpeed,
+        Math.max(limitProfile[index], possibleSpeed),
+      );
+    }
+
+    for (let index = path.length - 2; index >= 0; index -= 1) {
+      const nextSpeed = speedProfile[index + 1];
+      const possibleSpeed = nextSpeed + vehicleConfig.brakePower;
+
+      speedProfile[index] = Math.min(
+        speedProfile[index],
+        possibleSpeed,
+        limitProfile[index],
+      );
+    }
+
+    speedProfile[0] = Math.min(speedProfile[0], vehicleConfig.initialSpeed);
+
+    for (let index = 1; index < path.length; index += 1) {
+      speedProfile[index] = Math.min(
+        limitProfile[index],
+        speedProfile[index - 1] + vehicleConfig.accelPower,
+      );
+    }
+
+    let minSpeed = Infinity;
+    let apexIndex = -1;
+
+    for (let index = 1; index < speedProfile.length - 1; index += 1) {
+      if (speedProfile[index] < minSpeed) {
+        minSpeed = speedProfile[index];
+        apexIndex = index;
+      }
+    }
+
+    const segmentTypes = [];
+
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const delta = speedProfile[index + 1] - speedProfile[index];
+
+      if (delta > 0.3) segmentTypes.push("accelerate");
+      else if (delta < -0.3) segmentTypes.push("brake");
+      else segmentTypes.push("maintain");
+    }
+
+    return {
+      speedProfile,
+      segmentTypes,
+      apexPoint: apexIndex >= 0 ? path[apexIndex] : null,
+      minSpeed: Number.isFinite(minSpeed) ? minSpeed : null,
+    };
+  }
+
+  getLateralSpeedLimit(curvatureValue, vehicleConfig) {
+    if (curvatureValue < 1e-6) return vehicleConfig.initialSpeed;
+
+    const denominator =
+      vehicleConfig.mass * curvatureValue -
+      vehicleConfig.effectiveMu * vehicleConfig.downforce;
+
+    if (denominator <= 0) return vehicleConfig.initialSpeed;
+
+    return Math.sqrt(
+      (vehicleConfig.effectiveMu * vehicleConfig.mass * 9.81) / denominator,
+    );
+  }
+}
+
+
+class AppController {
+  constructor(elements) {
+    this.elements = elements;
+    this.state = new AppState();
+    this.renderer = new CanvasRenderer({
+      canvas: elements.canvas,
+      lineCanvas: elements.lineCanvas,
+      resultCanvas: elements.resultCanvas,
+    });
+    this.detector = new TrackDetectionService();
+    this.planner = new PathPlanningService();
+    this.analyzer = new PathAnalysisService();
+    this.sourceCanvas = document.createElement("canvas");
+    this.sourceContext = this.sourceCanvas.getContext("2d");
+    this.animationFrameId = null;
+    this.isPlaying = false;
+  }
+
+  init() {
+    this.bindEvents();
+    this.updateLabels();
+    this.updateCvStatus();
+    window.setInterval(() => this.updateCvStatus(), 800);
+    this.render();
+  }
+
+  bindEvents() {
+    const sliderIds = [
+      "mu",
+      "downforce",
+      "initialSpeed",
+      "mass",
+      "brakePower",
+      "accelPower",
+    ];
+
+    sliderIds.forEach((id) => {
+      this.elements[id].addEventListener("input", () => this.handleConfigChange());
+    });
+
+    this.elements.tireState.addEventListener("change", () => this.handleConfigChange());
+    this.elements.surfaceState.addEventListener("change", () => this.handleConfigChange());
+    this.elements.fileInput.addEventListener("change", (event) => {
+      const [file] = event.target.files;
+      this.handleFileSelected(file);
+    });
+    this.elements.autoDetectBtn.addEventListener("click", () => this.handleAutoDetect());
+    this.elements.clearDetectBtn.addEventListener("click", () => this.handleClearDetectedTrack());
+    this.elements.clearBtn.addEventListener("click", () => this.handleClearAll());
+    this.elements.undoBtn.addEventListener("click", () => this.handleUndoPoint());
+    this.elements.lineBtn.addEventListener("click", () => this.handleGenerateLine());
+    this.elements.apexBtn.addEventListener("click", () => this.handleAnalyzeOnly());
+    this.elements.playBtn.addEventListener("click", () => this.handlePlay());
+    this.elements.pauseBtn.addEventListener("click", () => this.handlePause());
+    this.elements.resetCarBtn.addEventListener("click", () => this.handleResetCar());
+    this.elements.canvas.addEventListener("click", (event) => this.handleCanvasClick(event));
+  }
+
+  updateCvStatus() {
+    this.elements.cvStatus.textContent = this.detector.isReady()
+      ? "OpenCV.js ready"
+      : "OpenCV.js loading";
+  }
+
+  setStatus(message) {
+    this.elements.status.textContent = message;
+  }
+
+  getEffectiveMu() {
+    return (
+      Number(this.elements.mu.value) *
+      Number(this.elements.tireState.value) *
+      Number(this.elements.surfaceState.value)
+    );
+  }
+
+  getVehicleConfig() {
+    return {
+      baseMu: Number(this.elements.mu.value),
+      effectiveMu: this.getEffectiveMu(),
+      initialSpeed: Number(this.elements.initialSpeed.value),
+      mass: Number(this.elements.mass.value),
+      brakePower: Number(this.elements.brakePower.value),
+      accelPower: Number(this.elements.accelPower.value),
+      downforce: Number(this.elements.downforce.value),
+    };
+  }
+
+  updateLabels() {
+    this.elements.muVal.textContent = Number(this.elements.mu.value).toFixed(2);
+    this.elements.downforceVal.textContent = Number(this.elements.downforce.value).toFixed(3);
+    this.elements.initialSpeedVal.textContent = Number(this.elements.initialSpeed.value).toFixed(0);
+    this.elements.massVal.textContent = Number(this.elements.mass.value).toFixed(0);
+    this.elements.brakePowerVal.textContent = Number(this.elements.brakePower.value).toFixed(1);
+    this.elements.accelPowerVal.textContent = Number(this.elements.accelPower.value).toFixed(1);
+    this.elements.muEffVal.textContent = this.getEffectiveMu().toFixed(2);
+    this.elements.apexCoordVal.textContent = this.state.apexPoint
+      ? `(${this.state.apexPoint.x.toFixed(1)}, ${this.state.apexPoint.y.toFixed(1)})`
+      : "-";
+    this.elements.minSpeedVal.textContent =
+      this.state.minSpeed !== null ? this.state.minSpeed.toFixed(1) : "-";
+
+    const activePath = this.state.getActivePath();
+    const progress =
+      activePath.length > 1
+        ? Math.round((this.state.carIndex / Math.max(1, activePath.length - 1)) * 100)
+        : 0;
+    this.elements.progressVal.textContent = `${progress}%`;
+  }
+
+  render() {
+    this.renderer.render(this.state);
+    this.updateLabels();
+  }
+
+  handleConfigChange() {
+    this.updateLabels();
+
+    if (this.state.userPoints.length >= 2) {
+      this.buildAndAnalyzePath({ showStatus: false });
+      return;
+    }
+
+    this.render();
+  }
+
+  async handleFileSelected(file) {
+    if (!file) {
+      this.setStatus("Select an image file first.");
+      return;
+    }
+
+    if (!String(file.type || "").startsWith("image/")) {
+      this.setStatus("The selected file is not a supported image.");
+      this.elements.fileInput.value = "";
+      return;
+    }
+
+    let image = null;
+
+    try {
+      image = await this.loadImage(file);
+      const width = image.width || image.naturalWidth;
+      const height = image.height || image.naturalHeight;
+
+      if (!width || !height) {
+        throw new Error("The browser could not read the image size.");
+      }
+
+      this.renderer.resize(width, height);
+      this.sourceCanvas.width = width;
+      this.sourceCanvas.height = height;
+      this.sourceContext.clearRect(0, 0, width, height);
+      this.sourceContext.drawImage(image, 0, 0, width, height);
+
+      const imageData = this.sourceContext.getImageData(0, 0, width, height);
+      this.state.setImage({ imageData, width, height });
+      this.stopAnimation();
+      this.render();
+      this.setStatus(
+        `Image loaded: ${file.name}. Add manual points or run auto detection.`,
+      );
+    } catch (error) {
+      this.render();
+      this.setStatus(error.message || "Failed to load the image.");
+    } finally {
+      if (image && typeof image.close === "function") {
+        image.close();
+      }
+      this.elements.fileInput.value = "";
+    }
+  }
+
+  async loadImage(file) {
+    const bitmap = await this.tryLoadImageBitmap(file);
+    if (bitmap) return bitmap;
+
+    try {
+      return await this.loadImageFromObjectUrl(file);
+    } catch (error) {
+      return this.loadImageFromFileReader(file);
+    }
+  }
+
+  async tryLoadImageBitmap(file) {
+    if (typeof window.createImageBitmap !== "function") return null;
+
+    try {
+      return await window.createImageBitmap(file);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  loadImageFromObjectUrl(file) {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+      let settled = false;
+
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        URL.revokeObjectURL(objectUrl);
+        callback(value);
+      };
+
+      image.onload = () => finish(resolve, image);
+      image.onerror = () => {
+        finish(reject, new Error("The browser could not decode this image file."));
+      };
+      image.src = objectUrl;
+    });
+  }
+
+  loadImageFromFileReader(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => {
+          reject(new Error("The browser could not decode this image file."));
+        };
+        image.src = reader.result;
+      };
+
+      reader.onerror = () => {
+        reject(new Error("The browser could not read the image file."));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  handleCanvasClick(event) {
+    if (!this.state.originalImage) {
+      this.setStatus("Load an image before placing control points.");
+      return;
+    }
+
+    const bounds = this.elements.canvas.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) * (this.elements.canvas.width / bounds.width);
+    const y = (event.clientY - bounds.top) * (this.elements.canvas.height / bounds.height);
+
+    this.stopAnimation();
+    this.state.addUserPoint({ x, y });
+    this.render();
+    this.setStatus(`Manual control points: ${this.state.userPoints.length}`);
+  }
+
+  handleUndoPoint() {
+    if (!this.state.removeLastUserPoint()) {
+      this.setStatus("There is no point to remove.");
+      return;
+    }
+
+    this.stopAnimation();
+    this.render();
+    this.setStatus(`Last point removed. Remaining points: ${this.state.userPoints.length}`);
+  }
+
+  handleClearAll() {
+    this.stopAnimation();
+    this.state.clearAllTrackData();
+    this.render();
+    this.setStatus("Detected track, control points, and driving line were cleared.");
+  }
+
+  handleClearDetectedTrack() {
+    this.state.clearDetectedTrack();
+    this.render();
+    this.setStatus("Auto detected track overlay was removed.");
+  }
+
+  handleGenerateLine() {
+    if (this.state.userPoints.length < 3) {
+      this.setStatus("At least 3 control points are required to build a driving line.");
+      return;
+    }
+
+    this.buildAndAnalyzePath({
+      showStatus: true,
+      statusMessage: "Driving line and analysis were rebuilt from the current control points.",
+    });
+  }
+
+  handleAnalyzeOnly() {
+    const activePath = this.state.getActivePath();
+    if (activePath.length < 3) {
+      this.setStatus("Build a driving line first.");
+      return;
+    }
+
+    const analysis = this.analyzer.analyze(activePath, this.getVehicleConfig());
+    this.state.setAnalysis(analysis);
+    this.render();
+
+    if (analysis.apexPoint) {
+      this.setStatus(
+        `Apex updated: (${analysis.apexPoint.x.toFixed(1)}, ${analysis.apexPoint.y.toFixed(1)})`,
+      );
+      return;
+    }
+
+    this.setStatus("Apex could not be found.");
+  }
+
+  handleAutoDetect() {
+    if (!this.detector.isReady()) {
+      this.setStatus("OpenCV.js is still loading. Please try again in a moment.");
+      return;
+    }
+
+    if (!this.state.originalImage) {
+      this.setStatus("Load an image before running auto detection.");
+      return;
+    }
+
+    try {
+      const { trackPoints } = this.detector.detect(this.sourceCanvas);
+      const controlPoints = this.planner.createControlPointsFromDetectedTrack(trackPoints);
+
+      this.stopAnimation();
+      this.state.setDetectedTrack(trackPoints);
+      this.state.setUserPoints(controlPoints, { autoGenerated: true });
+
+      this.buildAndAnalyzePath({
+        showStatus: true,
+        statusMessage: `Auto detection covered ${trackPoints.length} track points and generated ${controlPoints.length} driving-line control points.`,
+      });
+    } catch (error) {
+      this.render();
+      this.setStatus(error.message || "Auto detection failed.");
+    }
+  }
+
+  buildAndAnalyzePath({ showStatus, statusMessage }) {
+    const vehicleConfig = this.getVehicleConfig();
+    const generatedPaths = this.planner.buildPaths(this.state.userPoints, vehicleConfig);
+    this.state.setGeneratedPaths(generatedPaths);
+
+    const analysis = this.analyzer.analyze(this.state.getActivePath(), vehicleConfig);
+    this.state.setAnalysis(analysis);
+    this.render();
+
+    if (showStatus && statusMessage) {
+      this.setStatus(statusMessage);
+    }
+  }
+
+  handlePlay() {
+    const activePath = this.state.getActivePath();
+    if (activePath.length < 2 || this.state.speedProfile.length !== activePath.length) {
+      this.setStatus("Build and analyze the driving line first.");
+      return;
+    }
+
+    this.stopAnimation();
+    this.isPlaying = true;
+    this.animateCar();
+    this.setStatus("Animation started.");
+  }
+
+  handlePause() {
+    this.stopAnimation();
+    this.render();
+    this.setStatus("Animation paused.");
+  }
+
+  handleResetCar() {
+    this.stopAnimation();
+    this.state.resetCar();
+    this.render();
+    this.setStatus("Car position was reset to the start.");
+  }
+
+  animateCar() {
+    const activePath = this.state.getActivePath();
+
+    if (
+      !this.isPlaying ||
+      activePath.length < 2 ||
+      this.state.speedProfile.length !== activePath.length
+    ) {
+      this.stopAnimation();
+      this.render();
+      return;
+    }
+
+    if (this.state.carIndex >= activePath.length - 1) {
+      this.stopAnimation();
+      this.render();
+      this.setStatus("Animation finished.");
+      return;
+    }
+
+    const currentSpeed = Math.max(
+      1,
+      this.state.speedProfile[Math.min(this.state.carIndex, this.state.speedProfile.length - 1)],
+    );
+    const normalizedSpeed = clamp(currentSpeed / 200, 0.15, 1);
+    const stepSize = 0.05 + normalizedSpeed * 0.14;
+
+    this.state.carSubstep += stepSize;
+
+    while (this.state.carSubstep >= 1 && this.state.carIndex < activePath.length - 1) {
+      this.state.carSubstep -= 1;
+      this.state.carIndex += 1;
+    }
+
+    this.render();
+    this.animationFrameId = window.requestAnimationFrame(() => this.animateCar());
+  }
+
+  stopAnimation() {
+    this.isPlaying = false;
+
+    if (this.animationFrameId !== null) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+  }
+}
+
+function createElements() {
+  return {
+    fileInput: document.getElementById("fileInput"),
+    autoDetectBtn: document.getElementById("autoDetectBtn"),
+    clearDetectBtn: document.getElementById("clearDetectBtn"),
+    clearBtn: document.getElementById("clearBtn"),
+    undoBtn: document.getElementById("undoBtn"),
+    lineBtn: document.getElementById("lineBtn"),
+    apexBtn: document.getElementById("apexBtn"),
+    playBtn: document.getElementById("playBtn"),
+    pauseBtn: document.getElementById("pauseBtn"),
+    resetCarBtn: document.getElementById("resetCarBtn"),
+    canvas: document.getElementById("canvas"),
+    lineCanvas: document.getElementById("lineCanvas"),
+    resultCanvas: document.getElementById("resultCanvas"),
+    status: document.getElementById("status"),
+    cvStatus: document.getElementById("cvStatus"),
+    mu: document.getElementById("mu"),
+    downforce: document.getElementById("downforce"),
+    initialSpeed: document.getElementById("initialSpeed"),
+    mass: document.getElementById("mass"),
+    brakePower: document.getElementById("brakePower"),
+    accelPower: document.getElementById("accelPower"),
+    tireState: document.getElementById("tireState"),
+    surfaceState: document.getElementById("surfaceState"),
+    muVal: document.getElementById("muVal"),
+    downforceVal: document.getElementById("downforceVal"),
+    initialSpeedVal: document.getElementById("initialSpeedVal"),
+    massVal: document.getElementById("massVal"),
+    brakePowerVal: document.getElementById("brakePowerVal"),
+    accelPowerVal: document.getElementById("accelPowerVal"),
+    muEffVal: document.getElementById("muEffVal"),
+    apexCoordVal: document.getElementById("apexCoordVal"),
+    minSpeedVal: document.getElementById("minSpeedVal"),
+    progressVal: document.getElementById("progressVal"),
+  };
+}
+
+function initializeApp() {
+  const elements = createElements();
+  const missingElements = Object.entries(elements)
+    .filter(([, element]) => !element)
+    .map(([name]) => name);
+
+  if (missingElements.length) {
+    const message = `App startup failed because required UI elements are missing: ${missingElements.join(", ")}`;
+    const statusElement = document.getElementById("status");
+    if (statusElement) {
+      statusElement.textContent = message;
+    }
+    throw new Error(message);
+  }
+
+  const controller = new AppController(elements);
+  controller.init();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApp, { once: true });
+} else {
+  initializeApp();
+}
+
+})();
