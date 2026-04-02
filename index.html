@@ -2,161 +2,249 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>F1 Cornering Line Analyzer</title>
 <style>
-:root {
-  --bg: #f5f7fb;
-  --card: #ffffff;
-  --border: #d8e0ea;
-  --text: #1f2937;
-  --muted: #5b6472;
-  --accent: #ff00aa;
-  --apex: #1565c0;
-  --accel: #2e7d32;
-  --maintain: #f9a825;
-  --brake: #c62828;
+:root{
+  --bg:#f4f7fb;
+  --card:#ffffff;
+  --line:#e2e8f0;
+  --text:#1f2937;
+  --muted:#64748b;
+  --accent:#ff00aa;
+  --accent-soft:#ffe6f7;
+  --green:#2e7d32;
+  --yellow:#f9a825;
+  --red:#c62828;
+  --blue:#1565c0;
+  --dark:#111827;
 }
-* { box-sizing: border-box; }
-body {
-  font-family: Arial, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-  margin: 20px;
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  padding:24px;
+  background:linear-gradient(180deg,#f7f9fc 0%, #eef3fb 100%);
+  color:var(--text);
+  font-family:Arial,sans-serif;
 }
-.wrapper {
-  max-width: 1100px;
-  margin: 0 auto;
+.wrapper{
+  max-width:1200px;
+  margin:0 auto;
 }
-.section {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px 18px;
-  margin-bottom: 16px;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+.section{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:18px;
+  margin-bottom:18px;
+  box-shadow:0 10px 30px rgba(15,23,42,0.05);
 }
-canvas {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  margin-top: 12px;
-  width: min(900px, 90vw);
-  height: auto;
-  cursor: crosshair;
-  background: #fff;
+.headerRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+  flex-wrap:wrap;
 }
-button, input, select {
-  margin: 4px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #fff;
+.headerRow h2{
+  margin:0 0 6px 0;
 }
-button {
-  cursor: pointer;
-  font-weight: 600;
+.smallNote{
+  font-size:13px;
+  color:var(--muted);
 }
-button:hover { background: #f8fafc; }
-.controls { margin: 8px 0; }
-.row { margin: 8px 0; }
-label { margin: 0 8px; }
-#status {
-  font-weight: bold;
-  margin: 10px 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #eef4ff;
-  border: 1px solid #cddcfb;
+.status{
+  margin-top:12px;
+  padding:12px 14px;
+  border-radius:12px;
+  background:#eef4ff;
+  border:1px solid #cfdbff;
+  font-weight:700;
 }
-.legend {
-  display: inline-flex;
-  gap: 14px;
-  align-items: center;
-  margin-top: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
+.toolbar, .row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+  margin-top:12px;
 }
-.legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+button, input, select{
+  font:inherit;
 }
-.legend i {
-  width: 16px;
-  height: 16px;
-  display: inline-block;
-  border: 1px solid #333;
-  border-radius: 4px;
+button{
+  border:1px solid var(--line);
+  background:#fff;
+  color:var(--text);
+  padding:10px 14px;
+  border-radius:12px;
+  cursor:pointer;
+  font-weight:700;
+  transition:0.15s ease;
 }
-.canvasWrap { display: flex; justify-content: center; }
-.subnote { color: var(--muted); font-size: 14px; }
-.grid2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+button:hover{
+  transform:translateY(-1px);
+  background:#f8fafc;
 }
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+button.primary{
+  background:var(--accent);
+  color:#fff;
+  border-color:var(--accent);
 }
-.metricCard {
-  background: #fafcff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
+button.primary:hover{
+  filter:brightness(0.96);
 }
-.metricLabel {
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 4px;
+button.secondary{
+  background:var(--accent-soft);
+  border-color:#ffc3ea;
 }
-.metricValue {
-  font-size: 18px;
-  font-weight: 700;
+label.control{
+  background:#fafcff;
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:48px;
 }
-.small { font-size: 13px; color: var(--muted); }
-@media (max-width: 760px) {
-  .grid2 { grid-template-columns: 1fr; }
+input[type="range"]{
+  width:140px;
+}
+.metrics{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;
+  margin-top:14px;
+}
+.metric{
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  background:#fbfdff;
+}
+.metric .label{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.metric .value{
+  font-size:20px;
+  font-weight:800;
+}
+.legend{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  align-items:center;
+  margin-top:12px;
+}
+.legend span{
+  display:inline-flex;
+  gap:6px;
+  align-items:center;
+  font-size:14px;
+}
+.legend i{
+  width:14px;
+  height:14px;
+  border-radius:4px;
+  display:inline-block;
+  border:1px solid rgba(0,0,0,0.2);
+}
+.canvasGrid{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:18px;
+}
+.canvasCard h3{
+  margin:0 0 8px 0;
+}
+.canvasHint{
+  color:var(--muted);
+  font-size:13px;
+  margin-bottom:8px;
+}
+.canvasWrap{
+  display:flex;
+  justify-content:center;
+}
+canvas{
+  width:min(980px, 94vw);
+  max-width:100%;
+  height:auto;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#fff;
+}
+.analysisGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:18px;
+}
+.infoBlock{
+  max-width:980px;
+  margin:0 auto;
+  text-align:left;
+  line-height:1.7;
+}
+code.math{
+  display:block;
+  padding:10px 12px;
+  margin:8px 0;
+  border-radius:10px;
+  background:#f8fafc;
+  border:1px solid var(--line);
+  font-family:Consolas, monospace;
+  white-space:pre-wrap;
+}
+@media (max-width:900px){
+  .analysisGrid{grid-template-columns:1fr;}
+  body{padding:14px;}
 }
 </style>
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.cvReady=true"></script>
 </head>
 <body>
 <div class="wrapper">
   <div class="section">
-    <h2>F1 Cornering Line Analyzer</h2>
+    <div class="headerRow">
+      <div>
+        <h2>F1 Cornering Line Analyzer</h2>
+        <div class="smallNote">코너 주행선 생성, 변수 반영, 가감속 구간 분석, 자동 코너 후보 보조 검출</div>
+      </div>
+      <div class="smallNote" id="cvStatus">OpenCV.js 로딩 대기 중</div>
+    </div>
+
     <div class="row">
       <input type="file" id="fileInput" accept="image/*">
+      <button id="autoDetectBtn" class="secondary">자동 코너 후보 보기</button>
+      <button id="clearDetectBtn">자동 후보 지우기</button>
     </div>
-    <div class="controls">
+
+    <div class="toolbar">
       <button id="clearBtn">점 초기화</button>
       <button id="undoBtn">마지막 점 삭제</button>
-      <button id="lineBtn">주행선 생성</button>
+      <button id="lineBtn" class="primary">주행선 생성</button>
       <button id="apexBtn">Apex 계산</button>
-      <button id="playBtn">주행 시작</button>
+      <button id="playBtn" class="secondary">주행 시작</button>
       <button id="pauseBtn">일시정지</button>
       <button id="resetCarBtn">차량 초기화</button>
     </div>
+
     <div class="row">
-      <label>기본 마찰계수 μ <input type="range" id="mu" min="0.8" max="2.0" step="0.05" value="1.20"></label>
-      <span id="muVal">1.20</span>
-      <label>다운포스 계수 C <input type="range" id="downforce" min="0" max="0.02" step="0.001" value="0.002"></label>
-      <span id="downforceVal">0.002</span>
+      <label class="control">기본 마찰계수 μ <input type="range" id="mu" min="0.8" max="2.0" step="0.05" value="1.20"><span id="muVal">1.20</span></label>
+      <label class="control">다운포스 계수 C <input type="range" id="downforce" min="0" max="0.02" step="0.001" value="0.002"><span id="downforceVal">0.002</span></label>
+      <label class="control">초기 속도 v₀ <input type="range" id="initialSpeed" min="40" max="220" step="5" value="140"><span id="initialSpeedVal">140</span></label>
     </div>
+
     <div class="row">
-      <label>초기 속도 v₀ <input type="range" id="initialSpeed" min="40" max="220" step="5" value="140"></label>
-      <span id="initialSpeedVal">140</span>
-      <label>질량 m <input type="range" id="mass" min="600" max="1200" step="10" value="800"></label>
-      <span id="massVal">800</span>
+      <label class="control">질량 m <input type="range" id="mass" min="600" max="1200" step="10" value="800"><span id="massVal">800</span></label>
+      <label class="control">최대 제동 성능 <input type="range" id="brakePower" min="2" max="15" step="0.5" value="8"><span id="brakePowerVal">8.0</span></label>
+      <label class="control">최대 가속 성능 <input type="range" id="accelPower" min="1" max="10" step="0.5" value="5"><span id="accelPowerVal">5.0</span></label>
     </div>
+
     <div class="row">
-      <label>최대 제동 성능 <input type="range" id="brakePower" min="2" max="15" step="0.5" value="8"></label>
-      <span id="brakePowerVal">8.0</span>
-      <label>최대 가속 성능 <input type="range" id="accelPower" min="1" max="10" step="0.5" value="5"></label>
-      <span id="accelPowerVal">5.0</span>
-    </div>
-    <div class="row">
-      <label>타이어 상태
+      <label class="control">타이어 상태
         <select id="tireState">
           <option value="1.10">새 타이어</option>
           <option value="1.00" selected>보통</option>
@@ -164,7 +252,7 @@ label { margin: 0 8px; }
           <option value="0.85">심하게 마모됨</option>
         </select>
       </label>
-      <label>노면 상태
+      <label class="control">노면 상태
         <select id="surfaceState">
           <option value="1.05">매우 좋음</option>
           <option value="1.00" selected>건조</option>
@@ -172,79 +260,82 @@ label { margin: 0 8px; }
           <option value="0.65">젖은 노면</option>
         </select>
       </label>
-      <span class="subnote">실효 마찰계수 μeff = 기본 μ × 타이어 상태 × 노면 상태</span>
+      <div class="smallNote">실효 마찰계수 μeff = 기본 μ × 타이어 상태 × 노면 상태</div>
     </div>
-    <div id="status">이미지를 업로드하고 코너 중심을 따라 점을 찍으세요.</div>
+
+    <div class="status" id="status">이미지를 업로드하고 코너 중심을 따라 점을 찍으세요.</div>
+
+    <div class="metrics">
+      <div class="metric"><div class="label">실효 마찰계수</div><div class="value" id="muEffVal">1.20</div></div>
+      <div class="metric"><div class="label">Apex 좌표</div><div class="value" id="apexCoordVal">-</div></div>
+      <div class="metric"><div class="label">최저 속도</div><div class="value" id="minSpeedVal">-</div></div>
+      <div class="metric"><div class="label">진행률</div><div class="value" id="progressVal">0%</div></div>
+    </div>
+
     <div class="legend">
       <span><i style="background:#2e7d32"></i>가속 구간</span>
       <span><i style="background:#f9a825"></i>유지 구간</span>
       <span><i style="background:#c62828"></i>감속/브레이크 구간</span>
       <span><i style="background:#1565c0"></i>Apex</span>
       <span><i style="background:#111827"></i>차량 점</span>
-    </div>
-    <div class="metrics">
-      <div class="metricCard"><div class="metricLabel">실효 마찰계수</div><div class="metricValue" id="muEffVal">1.20</div></div>
-      <div class="metricCard"><div class="metricLabel">Apex 좌표</div><div class="metricValue small" id="apexCoordVal">-</div></div>
-      <div class="metricCard"><div class="metricLabel">최저 속도</div><div class="metricValue" id="minSpeedVal">-</div></div>
-      <div class="metricCard"><div class="metricLabel">차량 진행률</div><div class="metricValue" id="progressVal">0%</div></div>
+      <span><i style="background:#00bcd4"></i>자동 코너 후보</span>
     </div>
   </div>
 
-  <div class="section">
+  <div class="section canvasCard">
     <h3>원본 + 입력점 + 주행선</h3>
+    <div class="canvasHint">원본 이미지 위에 입력점, 최적화 주행선, apex, 차량 위치를 함께 보여준다.</div>
     <div class="canvasWrap"><canvas id="canvas"></canvas></div>
   </div>
 
-  <div class="section grid2">
-    <div>
+  <div class="section analysisGrid">
+    <div class="canvasCard">
       <h3>주행선</h3>
+      <div class="canvasHint">원본 위에 주행선과 차량 위치만 강조한다.</div>
       <div class="canvasWrap"><canvas id="lineCanvas"></canvas></div>
     </div>
-    <div>
+    <div class="canvasCard">
       <h3>주행선 분석</h3>
+      <div class="canvasHint">원본 위에 가속/유지/감속 구간을 색으로 시각화한다.</div>
       <div class="canvasWrap"><canvas id="resultCanvas"></canvas></div>
     </div>
   </div>
 
-  <div class="section" style="text-align:left; line-height:1.6;">
-    <h3>계산에 사용한 핵심 식과 미적분적 해석</h3>
-    <p><strong>1. 매개변수 함수로서의 주행 경로</strong><br>
-    차량의 주행 경로는 x(t), y(t) 형태의 매개변수 함수로 표현되며, 이는 시간에 따른 위치 변화를 나타낸다. 이때 dx/dt, dy/dt는 속도 벡터를 의미하며, 접선 방향을 결정한다.</p>
-
-    <p><strong>2. 곡률 = 방향 변화율</strong><br>
-    주행선의 곡률은 진행 방향의 변화율로 해석할 수 있다.</p>
-    <p style="font-family: monospace;">k ≈ |dx₁·dy₂ - dy₁·dx₂| / (dx₁² + dy₁²)^(3/2)</p>
-    <p>이는 미적분에서의 도함수 개념인 변화율을 기하적으로 확장한 것이다.</p>
-
-    <p><strong>3. 곡률과 속도의 관계</strong><br>
-    차량은 코너에서 구심가속도를 필요로 하며, 곡률이 클수록 허용 속도는 작아진다.</p>
-    <p style="font-family: monospace;">v_max ≈ sqrt((μ_eff · m · g) / (m · k - μ_eff · C))</p>
-    <p>즉, 속도는 곡률의 함수이며, 곡률은 경로의 함수이므로 전체 구조는 합성함수 형태이다.</p>
-
-    <p><strong>4. 속도 변화 = 적분적 사고</strong><br>
-    속도는 가속도의 누적으로 결정되므로, 실제 계산에서는 이를 이산적으로 근사하였다.</p>
-    <p style="font-family: monospace; white-space: pre-wrap;">vᵢ ≤ vᵢ₋₁ + a_acc
+  <div class="section">
+    <div class="infoBlock">
+      <h3>계산에 사용한 핵심 식과 미적분적 해석</h3>
+      <p><strong>1. 매개변수 함수로서의 주행 경로</strong><br>
+      차량의 주행 경로는 x(t), y(t) 형태의 매개변수 함수로 표현되며, 이는 시간에 따른 위치 변화를 나타낸다. 이때 dx/dt, dy/dt는 속도 벡터를 의미하며, 접선 방향을 결정한다.</p>
+      <p><strong>2. 곡률 = 방향 변화율</strong><br>
+      주행선의 곡률은 진행 방향의 변화율로 해석할 수 있다.</p>
+      <code class="math">k ≈ |dx₁·dy₂ - dy₁·dx₂| / (dx₁² + dy₁²)^(3/2)</code>
+      <p>이는 미적분에서의 도함수 개념인 변화율을 기하적으로 확장한 것이다.</p>
+      <p><strong>3. 곡률과 속도의 관계</strong><br>
+      차량은 코너에서 구심가속도를 필요로 하며, 곡률이 클수록 허용 속도는 작아진다.</p>
+      <code class="math">v_max ≈ sqrt((μ_eff · m · g) / (m · k - μ_eff · C))</code>
+      <p>즉, 속도는 곡률의 함수이며, 곡률은 경로의 함수이므로 전체 구조는 합성함수 형태이다.</p>
+      <p><strong>4. 속도 변화 = 적분적 사고</strong><br>
+      속도는 가속도의 누적으로 결정되므로, 실제 계산에서는 이를 이산적으로 근사하였다.</p>
+      <code class="math">vᵢ ≤ vᵢ₋₁ + a_acc
 vᵢ ≥ vᵢ₋₁ - a_brake
-vᵢ ≤ v_max(i)</p>
-    <p>이는 미적분에서의 적분 개념인 누적 변화를 코드로 구현한 것이다.</p>
-
-    <p><strong>5. Apex = 극값 문제</strong><br>
-    주행선에서 속도가 가장 낮아지는 지점을 apex로 정의하였다. 이는 속도 함수 v(s)의 최소값을 찾는 문제로, 미적분에서의 극값 개념과 연결된다.</p>
-
-    <hr>
-
-    <h3>논문과의 연관성</h3>
-    <p>본 탐구는 「속력변화를 고려한 비례항법유도의 최적성 해석」 논문에서 착안하여, 속력 변화와 변화율을 고려한 최적 경로 해석이라는 관점을 적용하였다. 해당 논문은 유도 문제를 다루지만, 본 탐구에서는 이를 차량 주행 문제로 확장하여 경로의 곡률과 속도 변화, 제어 조건을 함께 고려하는 방식으로 발전시켰다.</p>
-
-    <hr>
-
-    <h3>미적분 교과와의 연결</h3>
-    <p>본 탐구는 매개변수 함수의 미분, 변화율, 곡률, 합성함수, 적분적 사고, 극값 개념 등 미적분 교과의 핵심 개념과 직접적으로 연결된다. 특히 단순한 그래프 해석을 넘어, 실제 물리적 상황을 수학적으로 모델링하여 최적의 결과를 도출하는 과정에서 미적분의 활용 가능성을 확인할 수 있었다.</p>
+vᵢ ≤ v_max(i)</code>
+      <p>이는 미적분에서의 적분 개념인 누적 변화를 코드로 구현한 것이다.</p>
+      <p><strong>5. Apex = 극값 문제</strong><br>
+      주행선에서 속도가 가장 낮아지는 지점을 apex로 정의하였다. 이는 속도 함수 v(s)의 최소값을 찾는 문제로, 미적분에서의 극값 개념과 연결된다.</p>
+      <hr>
+      <h3>논문과의 연관성</h3>
+      <p>본 탐구는 「속력변화를 고려한 비례항법유도의 최적성 해석」 논문에서 착안하여, 속력 변화와 변화율을 고려한 최적 경로 해석이라는 관점을 적용하였다. 해당 논문은 유도 문제를 다루지만, 본 탐구에서는 이를 차량 주행 문제로 확장하여 경로의 곡률과 속도 변화, 제어 조건을 함께 고려하는 방식으로 발전시켰다.</p>
+      <hr>
+      <h3>미적분 교과와의 연결</h3>
+      <p>본 탐구는 매개변수 함수의 미분, 변화율, 곡률, 합성함수, 적분적 사고, 극값 개념 등 미적분 교과의 핵심 개념과 직접적으로 연결된다. 특히 단순한 그래프 해석을 넘어, 실제 물리적 상황을 수학적으로 모델링하여 최적의 결과를 도출하는 과정에서 미적분의 활용 가능성을 확인할 수 있었다.</p>
+    </div>
   </div>
 </div>
 
 <script>
 const fileInput = document.getElementById('fileInput');
+const autoDetectBtn = document.getElementById('autoDetectBtn');
+const clearDetectBtn = document.getElementById('clearDetectBtn');
 const clearBtn = document.getElementById('clearBtn');
 const undoBtn = document.getElementById('undoBtn');
 const lineBtn = document.getElementById('lineBtn');
@@ -259,6 +350,7 @@ const lctx = lineCanvas.getContext('2d');
 const resultCanvas = document.getElementById('resultCanvas');
 const rctx = resultCanvas.getContext('2d');
 const statusEl = document.getElementById('status');
+const cvStatus = document.getElementById('cvStatus');
 const muSlider = document.getElementById('mu');
 const downforceSlider = document.getElementById('downforce');
 const initialSpeedSlider = document.getElementById('initialSpeed');
@@ -285,30 +377,29 @@ let optimizedPath = [];
 let apexPoint = null;
 let speedProfile = [];
 let segmentTypes = [];
+let detectedCornerPoints = [];
 let minSpeed = null;
 let animationFrameId = null;
 let isPlaying = false;
 let carIndex = 0;
 let carSubstep = 0;
 
-function setStatus(message) {
-  statusEl.textContent = message;
-}
+function setStatus(message){ statusEl.textContent = message; }
 
-function getEffectiveMu() {
+function getEffectiveMu(){
   return Number(muSlider.value) * Number(tireStateSelect.value) * Number(surfaceStateSelect.value);
 }
 
-function updateMetricCards() {
+function updateMetricCards(){
   muEffVal.textContent = getEffectiveMu().toFixed(2);
   apexCoordVal.textContent = apexPoint ? `(${apexPoint.x.toFixed(1)}, ${apexPoint.y.toFixed(1)})` : '-';
-  minSpeedVal.textContent = minSpeed !== null ? `${minSpeed.toFixed(1)}` : '-';
-  const path = optimizedPath.length > 1 ? optimizedPath : smoothPath;
+  minSpeedVal.textContent = minSpeed !== null ? minSpeed.toFixed(1) : '-';
+  const path = getPath();
   const progress = path.length > 1 ? Math.round((carIndex / Math.max(1, path.length - 1)) * 100) : 0;
   progressVal.textContent = `${progress}%`;
 }
 
-function updateLabels() {
+function updateLabels(){
   muVal.textContent = Number(muSlider.value).toFixed(2);
   downforceVal.textContent = Number(downforceSlider.value).toFixed(3);
   initialSpeedVal.textContent = Number(initialSpeedSlider.value).toFixed(0);
@@ -318,7 +409,13 @@ function updateLabels() {
   updateMetricCards();
 }
 
-function updateAndAnalyzeIfNeeded() {
+function updateCvStatus(){
+  cvStatus.textContent = window.cvReady ? 'OpenCV.js 사용 가능' : 'OpenCV.js 로딩 대기 중';
+}
+setInterval(updateCvStatus, 800);
+updateCvStatus();
+
+function updateAndAnalyzeIfNeeded(){
   updateLabels();
   if (smoothPath.length >= 3) {
     const optimizedControls = buildOptimizedControlPoints(userPoints);
@@ -339,29 +436,25 @@ accelPowerSlider.addEventListener('input', updateAndAnalyzeIfNeeded);
 tireStateSelect.addEventListener('change', updateAndAnalyzeIfNeeded);
 surfaceStateSelect.addEventListener('change', updateAndAnalyzeIfNeeded);
 
-function cloneImageData(imageData) {
+function cloneImageData(imageData){
   return new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
 }
 
-function getPath() {
+function getPath(){
   return optimizedPath.length > 1 ? optimizedPath : smoothPath;
 }
 
-function getCarPoint() {
+function getCarPoint(){
   const path = getPath();
   if (path.length === 0) return null;
   const idx = Math.min(carIndex, path.length - 1);
   if (idx >= path.length - 1) return path[path.length - 1];
   const a = path[idx];
   const b = path[idx + 1];
-  const t = carSubstep;
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t
-  };
+  return { x: a.x + (b.x - a.x) * carSubstep, y: a.y + (b.y - a.y) * carSubstep };
 }
 
-function drawCar(targetCtx) {
+function drawCar(targetCtx){
   const p = getCarPoint();
   if (!p) return;
   targetCtx.fillStyle = '#111827';
@@ -373,27 +466,34 @@ function drawCar(targetCtx) {
   targetCtx.stroke();
 }
 
-function renderBaseImage() {
+function renderBaseImage(){
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (originalImage) {
-    ctx.putImageData(cloneImageData(originalImage), 0, 0);
-  } else {
+  if (originalImage) ctx.putImageData(cloneImageData(originalImage), 0, 0);
+  else {
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 }
 
-function drawUserPoints() {
-  if (userPoints.length === 0) return;
-  ctx.strokeStyle = 'lime';
+function drawDetectedPoints(targetCtx){
+  if (!detectedCornerPoints.length) return;
+  targetCtx.fillStyle = '#00bcd4';
+  for (const p of detectedCornerPoints) {
+    targetCtx.beginPath();
+    targetCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    targetCtx.fill();
+  }
+}
+
+function drawUserPoints(){
+  if (!userPoints.length) return;
+  ctx.strokeStyle = '#32d74b';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(userPoints[0].x, userPoints[0].y);
-  for (let i = 1; i < userPoints.length; i++) {
-    ctx.lineTo(userPoints[i].x, userPoints[i].y);
-  }
+  for (let i = 1; i < userPoints.length; i++) ctx.lineTo(userPoints[i].x, userPoints[i].y);
   ctx.stroke();
-  ctx.fillStyle = 'red';
+  ctx.fillStyle = '#ef4444';
   userPoints.forEach((p, i) => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, i === 0 ? 5 : 4, 0, Math.PI * 2);
@@ -401,10 +501,10 @@ function drawUserPoints() {
   });
 }
 
-function drawSmoothPathOnMain() {
+function drawSmoothPathOnMain(){
   const path = getPath();
   if (path.length < 2) return;
-  ctx.strokeStyle = varAccent = '#ff00aa';
+  ctx.strokeStyle = '#ff00aa';
   ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.moveTo(path[0].x, path[0].y);
@@ -412,7 +512,7 @@ function drawSmoothPathOnMain() {
   ctx.stroke();
 }
 
-function drawApexOnMain() {
+function drawApexOnMain(){
   if (!apexPoint) return;
   ctx.fillStyle = '#1565c0';
   ctx.beginPath();
@@ -420,7 +520,7 @@ function drawApexOnMain() {
   ctx.fill();
 }
 
-function drawSegmentedPath(targetCtx) {
+function drawSegmentedPath(targetCtx){
   const path = getPath();
   if (path.length < 2 || segmentTypes.length !== path.length - 1) return;
   targetCtx.lineWidth = 5;
@@ -434,7 +534,7 @@ function drawSegmentedPath(targetCtx) {
   }
 }
 
-function drawLineCanvas() {
+function drawLineCanvas(){
   const path = getPath();
   lctx.clearRect(0, 0, lineCanvas.width, lineCanvas.height);
   if (originalImage) lctx.putImageData(cloneImageData(originalImage), 0, 0);
@@ -459,7 +559,7 @@ function drawLineCanvas() {
   drawCar(lctx);
 }
 
-function drawResultCanvas() {
+function drawResultCanvas(){
   rctx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
   if (originalImage) rctx.putImageData(cloneImageData(originalImage), 0, 0);
   else {
@@ -467,17 +567,12 @@ function drawResultCanvas() {
     rctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
   }
   drawSegmentedPath(rctx);
-  if (apexPoint) {
-    rctx.fillStyle = '#1565c0';
-    rctx.beginPath();
-    rctx.arc(apexPoint.x, apexPoint.y, 7, 0, Math.PI * 2);
-    rctx.fill();
-  }
   drawCar(rctx);
 }
 
-function redraw() {
+function redraw(){
   renderBaseImage();
+  drawDetectedPoints(ctx);
   drawSmoothPathOnMain();
   drawUserPoints();
   drawApexOnMain();
@@ -487,7 +582,7 @@ function redraw() {
   updateMetricCards();
 }
 
-function linearInterpolate(a, b, samples) {
+function linearInterpolate(a, b, samples){
   const out = [];
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
@@ -496,7 +591,7 @@ function linearInterpolate(a, b, samples) {
   return out;
 }
 
-function catmullRomSpline(points, samplesPerSegment = 25) {
+function catmullRomSpline(points, samplesPerSegment = 25){
   if (points.length < 2) return points.slice();
   if (points.length === 2) return linearInterpolate(points[0], points[1], samplesPerSegment);
   const result = [];
@@ -518,11 +613,11 @@ function catmullRomSpline(points, samplesPerSegment = 25) {
   return result;
 }
 
-function clamp(value, min, max) {
+function clamp(value, min, max){
   return Math.max(min, Math.min(max, value));
 }
 
-function buildOptimizedControlPoints(points) {
+function buildOptimizedControlPoints(points){
   if (points.length < 3) return points.slice();
   const initialSpeed = Number(initialSpeedSlider.value);
   const brakePower = Number(brakePowerSlider.value);
@@ -539,15 +634,15 @@ function buildOptimizedControlPoints(points) {
       apexSeed = i;
     }
   }
-  const speedBias = clamp((initialSpeed - 130) / 120, -0.4, 0.7);
-  const brakeBias = clamp((8 - brakePower) / 8, -0.5, 0.7);
-  const accelBias = clamp((accelPower - 5) / 5, -0.5, 0.6);
-  const gripBias = clamp((1.2 - muEff) / 1.2, -0.6, 0.7);
-  const aeroBias = clamp((0.005 - downforce) / 0.005, -0.5, 0.5);
-  const apexShift = clamp(0.15 * speedBias + 0.22 * brakeBias + 0.18 * accelBias + 0.18 * gripBias + 0.10 * aeroBias, -0.35, 0.45);
+  const speedBias = clamp((initialSpeed - 130) / 120, -0.35, 0.6);
+  const brakeBias = clamp((8 - brakePower) / 8, -0.45, 0.65);
+  const accelBias = clamp((accelPower - 5) / 5, -0.45, 0.55);
+  const gripBias = clamp((1.2 - muEff) / 1.2, -0.55, 0.65);
+  const aeroBias = clamp((0.005 - downforce) / 0.005, -0.45, 0.45);
+  const apexShift = clamp(0.14 * speedBias + 0.20 * brakeBias + 0.16 * accelBias + 0.16 * gripBias + 0.08 * aeroBias, -0.3, 0.4);
   const apexPosition = clamp(apexSeed + apexShift, 1, points.length - 2);
-  const inwardStrength = clamp(6 + 7 * (1 - Math.min(muEff / 1.4, 1.2)) + 4 * Math.max(speedBias, 0), 3, 12);
-  const tangentStrength = clamp(4 * apexShift, -3, 4);
+  const inwardStrength = clamp(5 + 6 * (1 - Math.min(muEff / 1.4, 1.2)) + 3 * Math.max(speedBias, 0), 2.5, 10);
+  const tangentStrength = clamp(3.5 * apexShift, -2.5, 3.5);
   for (let i = 1; i < optimized.length - 1; i++) {
     const prev = points[i - 1];
     const curr = points[i];
@@ -561,12 +656,12 @@ function buildOptimizedControlPoints(points) {
     const normalX = cross >= 0 ? -tangentY : tangentY;
     const normalY = cross >= 0 ? tangentX : -tangentX;
     const distFromApex = i - apexPosition;
-    const coreWeight = Math.exp(-(distFromApex * distFromApex) / 0.9);
-    const entryWeight = i < apexPosition ? Math.exp(-(distFromApex * distFromApex) / 2.5) : 0;
-    const exitWeight = i > apexPosition ? Math.exp(-(distFromApex * distFromApex) / 2.5) : 0;
+    const coreWeight = Math.exp(-(distFromApex * distFromApex) / 1.0);
+    const entryWeight = i < apexPosition ? Math.exp(-(distFromApex * distFromApex) / 2.7) : 0;
+    const exitWeight = i > apexPosition ? Math.exp(-(distFromApex * distFromApex) / 2.7) : 0;
     const inwardOffset = inwardStrength * coreWeight;
     const alongOffset = tangentStrength * coreWeight;
-    const widenOffset = 3.5 * (entryWeight + exitWeight) * (0.55 + Math.max(accelBias, 0) * 0.45);
+    const widenOffset = 3.2 * (entryWeight + exitWeight) * (0.55 + Math.max(accelBias, 0) * 0.45);
     optimized[i] = {
       x: curr.x + normalX * inwardOffset - normalX * widenOffset + tangentX * alongOffset,
       y: curr.y + normalY * inwardOffset - normalY * widenOffset + tangentY * alongOffset
@@ -587,7 +682,7 @@ function buildOptimizedControlPoints(points) {
   return optimized;
 }
 
-function curvature(a, b, c) {
+function curvature(a, b, c){
   const dx1 = b.x - a.x;
   const dy1 = b.y - a.y;
   const dx2 = c.x - b.x;
@@ -597,7 +692,7 @@ function curvature(a, b, c) {
   return denom === 0 ? 0 : cross / denom;
 }
 
-function lateralSpeedLimit(k) {
+function lateralSpeedLimit(k){
   const muEff = getEffectiveMu();
   const g = 9.81;
   const m = Number(massSlider.value);
@@ -608,7 +703,7 @@ function lateralSpeedLimit(k) {
   return Math.sqrt((muEff * m * g) / denom);
 }
 
-function analyzePath(updateStatus = true) {
+function analyzePath(updateStatus = true){
   const path = getPath();
   if (path.length < 3) {
     speedProfile = [];
@@ -639,9 +734,7 @@ function analyzePath(updateStatus = true) {
     speedProfile[i] = Math.min(speedProfile[i], possibleNext, limitProfile[i]);
   }
   speedProfile[0] = Math.min(speedProfile[0], initialSpeed);
-  for (let i = 1; i < path.length; i++) {
-    speedProfile[i] = Math.min(limitProfile[i], speedProfile[i - 1] + accelPower);
-  }
+  for (let i = 1; i < path.length; i++) speedProfile[i] = Math.min(limitProfile[i], speedProfile[i - 1] + accelPower);
   minSpeed = Infinity;
   let apexIndex = -1;
   for (let i = 1; i < speedProfile.length - 1; i++) {
@@ -665,7 +758,7 @@ function analyzePath(updateStatus = true) {
   }
 }
 
-function stopAnimation() {
+function stopAnimation(){
   isPlaying = false;
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId);
@@ -673,7 +766,7 @@ function stopAnimation() {
   }
 }
 
-function animateCar() {
+function animateCar(){
   const path = getPath();
   if (!isPlaying || path.length < 2 || speedProfile.length !== path.length) {
     stopAnimation();
@@ -686,19 +779,79 @@ function animateCar() {
     setStatus('주행 애니메이션이 끝났어.');
     return;
   }
-
   const currentSpeed = Math.max(1, speedProfile[Math.min(carIndex, speedProfile.length - 1)]);
-  const normalized = clamp(currentSpeed / 200, 0.08, 1.0);
-  const stepSize = 0.015 + normalized * 0.06;
+  const normalized = clamp(currentSpeed / 200, 0.15, 1.0);
+  const stepSize = 0.05 + normalized * 0.14;
   carSubstep += stepSize;
-
   while (carSubstep >= 1 && carIndex < path.length - 1) {
     carSubstep -= 1;
     carIndex += 1;
   }
-
   redraw();
   animationFrameId = requestAnimationFrame(animateCar);
+}
+
+function autoDetectCorners(){
+  if (!window.cvReady || typeof cv === 'undefined') {
+    setStatus('OpenCV.js가 아직 준비되지 않았어. 잠시 후 다시 눌러줘.');
+    return;
+  }
+  if (!originalImage) {
+    setStatus('먼저 이미지를 업로드해줘.');
+    return;
+  }
+  detectedCornerPoints = [];
+  const src = cv.imread(canvas);
+  const gray = new cv.Mat();
+  const blur = new cv.Mat();
+  const edges = new cv.Mat();
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  const tmpMask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+    cv.Canny(blur, edges, 60, 160);
+    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+    if (contours.size() === 0) {
+      setStatus('자동 검출에서 윤곽을 찾지 못했어. 더 단순한 레이아웃 이미지를 써봐.');
+      return;
+    }
+    let bestIdx = 0;
+    let bestArea = 0;
+    for (let i = 0; i < contours.size(); i++) {
+      const area = cv.contourArea(contours.get(i));
+      if (area > bestArea) {
+        bestArea = area;
+        bestIdx = i;
+      }
+    }
+    cv.drawContours(tmpMask, contours, bestIdx, new cv.Scalar(255), 2);
+    const contour = contours.get(bestIdx);
+    const raw = [];
+    for (let i = 0; i < contour.data32S.length; i += 2) raw.push({ x: contour.data32S[i], y: contour.data32S[i + 1] });
+    if (raw.length < 12) {
+      setStatus('자동 검출 결과가 너무 적어서 후보를 만들지 못했어.');
+      return;
+    }
+    const sampleGap = Math.max(6, Math.floor(raw.length / 120));
+    const candidates = [];
+    for (let i = sampleGap; i < raw.length - sampleGap; i += sampleGap) {
+      const a = raw[i - sampleGap];
+      const b = raw[i];
+      const c = raw[i + sampleGap];
+      const k = curvature(a, b, c);
+      candidates.push({ ...b, k });
+    }
+    candidates.sort((p, q) => q.k - p.k);
+    detectedCornerPoints = candidates.slice(0, 6).map(p => ({ x: p.x, y: p.y }));
+    redraw();
+    setStatus(`자동 코너 후보 ${detectedCornerPoints.length}개를 표시했어. 참고용으로만 사용해줘.`);
+  } catch (err) {
+    setStatus('자동 코너 후보 검출 중 오류가 발생했어.');
+  } finally {
+    src.delete(); gray.delete(); blur.delete(); edges.delete(); contours.delete(); hierarchy.delete(); tmpMask.delete();
+  }
 }
 
 fileInput.addEventListener('change', (e) => {
@@ -726,6 +879,7 @@ fileInput.addEventListener('change', (e) => {
       apexPoint = null;
       speedProfile = [];
       segmentTypes = [];
+      detectedCornerPoints = [];
       minSpeed = null;
       carIndex = 0;
       carSubstep = 0;
@@ -738,6 +892,13 @@ fileInput.addEventListener('change', (e) => {
   };
   reader.onerror = () => setStatus('파일 읽기 실패');
   reader.readAsDataURL(file);
+});
+
+autoDetectBtn.addEventListener('click', autoDetectCorners);
+clearDetectBtn.addEventListener('click', () => {
+  detectedCornerPoints = [];
+  redraw();
+  setStatus('자동 코너 후보를 지웠어.');
 });
 
 canvas.addEventListener('click', (e) => {
@@ -769,6 +930,7 @@ clearBtn.addEventListener('click', () => {
   apexPoint = null;
   speedProfile = [];
   segmentTypes = [];
+  detectedCornerPoints = [];
   minSpeed = null;
   carIndex = 0;
   carSubstep = 0;
@@ -778,7 +940,7 @@ clearBtn.addEventListener('click', () => {
 });
 
 undoBtn.addEventListener('click', () => {
-  if (userPoints.length === 0) {
+  if (!userPoints.length) {
     setStatus('삭제할 점이 없어.');
     return;
   }
@@ -808,7 +970,7 @@ lineBtn.addEventListener('click', () => {
   carSubstep = 0;
   stopAnimation();
   analyzePath(false);
-  setStatus('기본 주행선을 생성했고 변수 변화는 이제 실시간으로 반영돼.');
+  setStatus('기본 주행선을 생성했고 변수 변화는 실시간으로 반영돼.');
 });
 
 apexBtn.addEventListener('click', () => {
@@ -848,19 +1010,19 @@ resetCarBtn.addEventListener('click', () => {
   setStatus('차량 위치를 시작점으로 되돌렸어.');
 });
 
-function testCurvature() {
+function testCurvature(){
   const k = curvature({x:0,y:0}, {x:1,y:1}, {x:2,y:0});
   console.assert(k > 0, '곡률 테스트 실패');
 }
-function testLinearInterpolation() {
+function testLinearInterpolation(){
   const pts = linearInterpolate({x:0,y:0}, {x:10,y:0}, 5);
   console.assert(pts.length === 6, '선형보간 테스트 실패');
 }
-function testSpline() {
+function testSpline(){
   const pts = catmullRomSpline([{x:0,y:0},{x:10,y:10},{x:20,y:0}], 10);
   console.assert(pts.length > 10, '스플라인 테스트 실패');
 }
-function testEffectiveMu() {
+function testEffectiveMu(){
   muSlider.value = '1.20';
   tireStateSelect.value = '0.92';
   surfaceStateSelect.value = '0.82';
@@ -868,7 +1030,7 @@ function testEffectiveMu() {
   tireStateSelect.value = '1.00';
   surfaceStateSelect.value = '1.00';
 }
-function testOptimizedPathExists() {
+function testOptimizedPathExists(){
   const pts = [{x:0,y:0},{x:10,y:10},{x:20,y:0},{x:30,y:5}];
   const out = buildOptimizedControlPoints(pts);
   console.assert(out.length === pts.length, '최적화 제어점 테스트 실패');
