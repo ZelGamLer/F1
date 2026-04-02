@@ -1,9 +1,9 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>F1 Cornering Line Analyzer</title>
+    <title>F1 코너링 라인 분석기</title>
     <link rel="stylesheet" href="./styles/app.css" />
     <script>
       window.cvReady = false;
@@ -13,10 +13,10 @@
           const cvStatus = document.getElementById("cvStatus");
           if (status) {
             status.textContent =
-              "You opened this page with file://. This build should still work, and if a browser blocks features you can use opera.bat to run it through a local server.";
+              "file:// 프로토콜로 열었습니다. 대부분의 경우 정상 작동하며, 브라우저가 기능을 차단하면 로컬 서버를 통해 실행하세요.";
           }
           if (cvStatus) {
-            cvStatus.textContent = "Local file mode detected";
+            cvStatus.textContent = "로컬 파일 모드";
           }
         }
       });
@@ -29,182 +29,161 @@
   </head>
   <body>
     <div class="wrapper">
-      <div class="section">
+      <div class="section hero-section">
         <div class="headerRow">
           <div>
-            <h2>F1 Cornering Line Analyzer</h2>
+            <h2>🏎️ F1 코너링 라인 분석기</h2>
             <div class="smallNote">
-              Track detection, driving-line generation, speed analysis, and apex review in one page.
+              트랙 이미지를 업로드하면 자동으로 주행 라인을 검출하고, 속도 분석 및 에이펙스(Apex)를 계산합니다.
             </div>
           </div>
-          <div class="smallNote" id="cvStatus">OpenCV.js loading</div>
+          <div class="badge" id="cvStatus">준비 중…</div>
+        </div>
+
+        <div class="row action-row">
+          <label class="file-label">
+            📁 이미지 선택
+            <input type="file" id="fileInput" accept="image/*" />
+          </label>
+          <button id="autoDetectBtn" class="accent-btn">🔍 자동 검출 및 라인 생성</button>
+          <button id="clearDetectBtn" class="ghost-btn">검출 오버레이 지우기</button>
         </div>
 
         <div class="row">
-          <input type="file" id="fileInput" accept="image/*" />
-          <button id="autoDetectBtn" class="secondary">Auto Detect + Build Line</button>
-          <button id="clearDetectBtn">Clear Detection Overlay</button>
+          <label class="control highlight-control"
+            >🎯 검출 밀도
+            <input
+              type="range"
+              id="density"
+              min="10"
+              max="120"
+              step="5"
+              value="40"
+            /><span id="densityVal">40</span></label
+          >
         </div>
 
         <div class="toolbar">
-          <button id="clearBtn">Clear All Points</button>
-          <button id="undoBtn">Undo Last Point</button>
-          <button id="lineBtn" class="primary">Build Driving Line</button>
-          <button id="apexBtn">Recalculate Apex</button>
-          <button id="playBtn" class="secondary">Start Animation</button>
-          <button id="pauseBtn">Pause</button>
-          <button id="resetCarBtn">Reset Car</button>
+          <button id="clearBtn" class="ghost-btn">모든 점 지우기</button>
+          <button id="undoBtn" class="ghost-btn">↩ 실행 취소</button>
+          <button id="lineBtn" class="accent-btn">🛣️ 주행 라인 생성</button>
+          <button id="apexBtn" class="ghost-btn">에이펙스 재계산</button>
+          <button id="playBtn" class="secondary">▶ 애니메이션</button>
+          <button id="pauseBtn" class="ghost-btn">⏸ 일시정지</button>
+          <button id="resetCarBtn" class="ghost-btn">🔄 초기화</button>
         </div>
 
-        <div class="row">
-          <label class="control"
-            >Base friction mu
-            <input
-              type="range"
-              id="mu"
-              min="0.8"
-              max="2.0"
-              step="0.05"
-              value="1.20"
-            /><span id="muVal">1.20</span></label
-          >
-          <label class="control"
-            >Downforce C
-            <input
-              type="range"
-              id="downforce"
-              min="0"
-              max="0.02"
-              step="0.001"
-              value="0.002"
-            /><span id="downforceVal">0.002</span></label
-          >
-          <label class="control"
-            >Initial speed
-            <input
-              type="range"
-              id="initialSpeed"
-              min="40"
-              max="220"
-              step="5"
-              value="140"
-            /><span id="initialSpeedVal">140</span></label
-          >
-        </div>
-
-        <div class="row">
-          <label class="control"
-            >Mass
-            <input
-              type="range"
-              id="mass"
-              min="600"
-              max="1200"
-              step="10"
-              value="800"
-            /><span id="massVal">800</span></label
-          >
-          <label class="control"
-            >Brake power
-            <input
-              type="range"
-              id="brakePower"
-              min="2"
-              max="15"
-              step="0.5"
-              value="8"
-            /><span id="brakePowerVal">8.0</span></label
-          >
-          <label class="control"
-            >Accel power
-            <input
-              type="range"
-              id="accelPower"
-              min="1"
-              max="10"
-              step="0.5"
-              value="5"
-            /><span id="accelPowerVal">5.0</span></label
-          >
-        </div>
-
-        <div class="row">
-          <label class="control"
-            >Tire state
-            <select id="tireState">
-              <option value="1.10">New</option>
-              <option value="1.00" selected>Normal</option>
-              <option value="0.92">Worn</option>
-              <option value="0.85">Very worn</option>
-            </select>
-          </label>
-          <label class="control"
-            >Surface state
-            <select id="surfaceState">
-              <option value="1.05">Excellent</option>
-              <option value="1.00" selected>Dry</option>
-              <option value="0.82">Damp</option>
-              <option value="0.65">Wet</option>
-            </select>
-          </label>
-          <div class="smallNote">
-            Auto detect converts the detected track into control points and then builds the driving line automatically.
+        <details class="param-details">
+          <summary>⚙️ 차량 파라미터 설정</summary>
+          <div class="row">
+            <label class="control"
+              >마찰 계수 (Mu)
+              <input type="range" id="mu" min="0.8" max="2.0" step="0.05" value="1.20" />
+              <span id="muVal">1.20</span></label
+            >
+            <label class="control"
+              >다운포스 (C)
+              <input type="range" id="downforce" min="0" max="0.02" step="0.001" value="0.002" />
+              <span id="downforceVal">0.002</span></label
+            >
+            <label class="control"
+              >초기 속도 (km/h)
+              <input type="range" id="initialSpeed" min="40" max="220" step="5" value="140" />
+              <span id="initialSpeedVal">140</span></label
+            >
           </div>
-        </div>
+          <div class="row">
+            <label class="control"
+              >차량 중량 (kg)
+              <input type="range" id="mass" min="600" max="1200" step="10" value="800" />
+              <span id="massVal">800</span></label
+            >
+            <label class="control"
+              >제동력
+              <input type="range" id="brakePower" min="2" max="15" step="0.5" value="8" />
+              <span id="brakePowerVal">8.0</span></label
+            >
+            <label class="control"
+              >가속력
+              <input type="range" id="accelPower" min="1" max="10" step="0.5" value="5" />
+              <span id="accelPowerVal">5.0</span></label
+            >
+          </div>
+          <div class="row">
+            <label class="control"
+              >타이어 상태
+              <select id="tireState">
+                <option value="1.10">새 타이어</option>
+                <option value="1.00" selected>보통</option>
+                <option value="0.92">마모됨</option>
+                <option value="0.85">매우 마모됨</option>
+              </select>
+            </label>
+            <label class="control"
+              >노면 상태
+              <select id="surfaceState">
+                <option value="1.05">최상</option>
+                <option value="1.00" selected>건조</option>
+                <option value="0.82">약간 젖음</option>
+                <option value="0.65">젖음</option>
+              </select>
+            </label>
+          </div>
+        </details>
 
         <div class="status" id="status">
-          Load an image, add manual points, or run auto detection.
+          이미지를 로드하거나, 수동으로 점을 추가하거나, 자동 검출을 실행하세요.
         </div>
 
         <div class="metrics">
           <div class="metric">
-            <div class="label">Effective mu</div>
+            <div class="label">유효 마찰 계수</div>
             <div class="value" id="muEffVal">1.20</div>
           </div>
           <div class="metric">
-            <div class="label">Apex</div>
+            <div class="label">에이펙스</div>
             <div class="value" id="apexCoordVal">-</div>
           </div>
           <div class="metric">
-            <div class="label">Min speed</div>
+            <div class="label">최소 속도</div>
             <div class="value" id="minSpeedVal">-</div>
           </div>
           <div class="metric">
-            <div class="label">Progress</div>
+            <div class="label">진행률</div>
             <div class="value" id="progressVal">0%</div>
           </div>
         </div>
 
         <div class="legend">
-          <span><i style="background: #2e7d32"></i>Accelerate</span>
-          <span><i style="background: #f9a825"></i>Maintain</span>
-          <span><i style="background: #c62828"></i>Brake</span>
-          <span><i style="background: #1565c0"></i>Apex</span>
-          <span><i style="background: #111827"></i>Car</span>
-          <span><i style="background: #00bcd4"></i>Detected track</span>
+          <span><i style="background: #10b981"></i>가속</span>
+          <span><i style="background: #f59e0b"></i>유지</span>
+          <span><i style="background: #ef4444"></i>브레이킹</span>
+          <span><i style="background: #3b82f6"></i>에이펙스</span>
+          <span><i style="background: #111827"></i>차량</span>
+          <span><i style="background: #06b6d4"></i>감지된 트랙</span>
         </div>
       </div>
 
       <div class="section canvasCard">
-        <h3>Image + Track + Control Points + Driving Line</h3>
+        <h3>📷 이미지 + 트랙 + 기준점 + 주행 라인</h3>
         <div class="canvasHint">
-          The original image, detected track, control points, and final driving line are shown together here.
+          원본 이미지 위에 감지된 트랙, 기준점, 최종 주행 라인이 표시됩니다. 캔버스를 클릭하여 수동으로 점을 추가할 수 있습니다.
         </div>
         <div class="canvasWrap"><canvas id="canvas"></canvas></div>
       </div>
 
       <div class="section analysisGrid">
         <div class="canvasCard">
-          <h3>Driving Line View</h3>
+          <h3>🛣️ 주행 라인 뷰</h3>
           <div class="canvasHint">
-            Shows the final path, apex, and car position.
+            최종 주행 경로, 에이펙스 및 차량 위치를 보여줍니다.
           </div>
           <div class="canvasWrap"><canvas id="lineCanvas"></canvas></div>
         </div>
         <div class="canvasCard">
-          <h3>Analysis View</h3>
+          <h3>📊 분석 뷰</h3>
           <div class="canvasHint">
-            Visualizes acceleration, maintain, and braking sections.
+            가속/유지/감속 구간을 색상으로 구분합니다.
           </div>
           <div class="canvasWrap"><canvas id="resultCanvas"></canvas></div>
         </div>
@@ -212,15 +191,13 @@
 
       <div class="section">
         <div class="infoBlock">
-          <h3>Run Note</h3>
+          <h3>ℹ️ 실행 안내</h3>
           <p>
-            This page now uses a bundled runtime script, so direct opening with
-            <code>file://</code> should work in most cases.
+            이 페이지는 번들된 스크립트를 사용하므로 <code>file://</code>로 직접 열어도 대부분 정상 작동합니다.
           </p>
           <p>
-            If your browser still blocks local execution, use
-            <code>opera.bat</code> to rebuild the bundle and open the app
-            through a local HTTP server.
+            브라우저가 로컬 실행을 차단하는 경우 <code>run.bat</code>를 사용하여
+            로컬 HTTP 서버를 통해 앱을 실행하세요.
           </p>
         </div>
       </div>

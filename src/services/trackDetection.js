@@ -6,460 +6,284 @@ import {
   smoothPolyline,
 } from "../utils/geometry.js";
 
-const NEIGHBOR_OFFSETS = [
-  [-1, -1],
-  [0, -1],
-  [1, -1],
-  [-1, 0],
-  [1, 0],
-  [-1, 1],
-  [0, 1],
-  [1, 1],
-];
-
+/**
+ * Pure-canvas track detection.
+ *
+ * Strategy (no OpenCV skeletonization needed):
+ *   1. Read raw RGBA pixels from the canvas.
+ *   2. Build a binary mask — dark pixels (brightness < threshold) = 1.
+ *   3. Compute a distance-transform to find how far each dark pixel is
+ *      from the nearest non-dark pixel. The thickest line has the highest
+ *      values in the distance field.
+ *   4. Find connected components of the binary mask and keep only the
+ *      largest one (the track).
+ *   5. Among that component, collect the "ridge" — pixels whose distance
+ *      value is a local maximum across a small neighborhood. This is the
+ *      centerline of the thick track.
+ *   6. Order the ridge pixels into a path (nearest-neighbor greedy walk).
+ *   7. Smooth & resample.
+ */
 export class TrackDetectionService {
+  /* OpenCV is loaded but we no longer require it for detection. */
   isReady() {
-    return Boolean(globalThis.cvReady && globalThis.cv);
+    return true;
   }
 
-  detect(sourceCanvas) {
-    if (!this.isReady()) {
-      throw new Error("OpenCV.js is not ready yet.");
+  detect(sourceCanvas, { density = 40 } = {}) {
+    const w = sourceCanvas.width;
+    const h = sourceCanvas.height;
+    const ctx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const rgba = imageData.data;
+
+    // --- 1. DOWN-SCALE for speed (work at ≤ 400px on the longest side) ---
+    const MAX_DIM = 400;
+    let scale = 1;
+    let sw = w, sh = h;
+    if (Math.max(w, h) > MAX_DIM) {
+      scale = Math.max(w, h) / MAX_DIM;
+      sw = Math.round(w / scale);
+      sh = Math.round(h / scale);
     }
 
-    const cv = globalThis.cv;
-    const src = cv.imread(sourceCanvas);
-    const gray = new cv.Mat();
-    const blurred = new cv.Mat();
-    const binaryInverse = new cv.Mat();
-    const binary = new cv.Mat();
-    const contours = new cv.MatVector();
-    const hierarchy = new cv.Mat();
-    let filledMask = null;
-    let maskRoi = null;
-
-    try {
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-      cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0);
-      cv.threshold(
-        blurred,
-        binaryInverse,
-        0,
-        255,
-        cv.THRESH_BINARY_INV + cv.THRESH_OTSU,
-      );
-
-      const kernel = cv.getStructuringElement(
-        cv.MORPH_RECT,
-        new cv.Size(5, 5),
-      );
-      cv.morphologyEx(binaryInverse, binary, cv.MORPH_CLOSE, kernel);
-      cv.morphologyEx(binary, binary, cv.MORPH_OPEN, kernel);
-      kernel.delete();
-
-      cv.findContours(
-        binary,
-        contours,
-        hierarchy,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_NONE,
-      );
-
-      if (contours.size() === 0) {
-        throw new Error("No thick track-like contour was found.");
+    // Build brightness array at working resolution
+    const bright = new Uint8Array(sw * sh);
+    for (let sy = 0; sy < sh; sy++) {
+      for (let sx = 0; sx < sw; sx++) {
+        // nearest-neighbor sample from original
+        const ox = Math.min(Math.round(sx * scale), w - 1);
+        const oy = Math.min(Math.round(sy * scale), h - 1);
+        const idx = (oy * w + ox) * 4;
+        const r = rgba[idx], g = rgba[idx + 1], b = rgba[idx + 2];
+        bright[sy * sw + sx] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
       }
-
-      const bestContourIndex = this.findBestContourIndex(contours, src);
-
-      if (bestContourIndex === -1) {
-        throw new Error("Could not choose the strongest track contour.");
-      }
-
-      const contour = contours.get(bestContourIndex);
-      const rect = cv.boundingRect(contour);
-      const padding = 14;
-      const roiX = Math.max(0, rect.x - padding);
-      const roiY = Math.max(0, rect.y - padding);
-      const roiWidth = Math.min(src.cols - roiX, rect.width + padding * 2);
-      const roiHeight = Math.min(src.rows - roiY, rect.height + padding * 2);
-
-      filledMask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-      cv.drawContours(
-        filledMask,
-        contours,
-        bestContourIndex,
-        new cv.Scalar(255),
-        -1,
-      );
-
-      maskRoi = filledMask
-        .roi(new cv.Rect(roiX, roiY, roiWidth, roiHeight))
-        .clone();
-
-      const trackPoints = this.extractCenterline(maskRoi, roiX, roiY);
-
-      if (trackPoints.length < 8) {
-        throw new Error("Could not extract a long enough centerline.");
-      }
-
-      return { trackPoints };
-    } finally {
-      src.delete();
-      gray.delete();
-      blurred.delete();
-      binaryInverse.delete();
-      binary.delete();
-      contours.delete();
-      hierarchy.delete();
-      if (filledMask) filledMask.delete();
-      if (maskRoi) maskRoi.delete();
     }
-  }
 
-  findBestContourIndex(contours, src) {
-    const cv = globalThis.cv;
-    const imageArea = src.rows * src.cols;
-    let bestIndex = -1;
-    let bestScore = -Infinity;
+    // --- 2. BINARY MASK (dark pixels) ---
+    // Use a low threshold to only catch truly black lines (not grey ones)
+    const THRESH = 80;
+    const mask = new Uint8Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) {
+      mask[i] = bright[i] < THRESH ? 1 : 0;
+    }
 
-    for (let index = 0; index < contours.size(); index += 1) {
-      const contour = contours.get(index);
-      const area = cv.contourArea(contour);
-      if (area < imageArea * 0.002) continue;
+    // Morphological close (dilate then erode) with a 3x3 kernel to fill small gaps
+    this._dilate(mask, sw, sh);
+    this._erode(mask, sw, sh);
 
-      const rect = cv.boundingRect(contour);
-      const perimeter = cv.arcLength(contour, true);
-      if (perimeter <= 0) continue;
+    // --- 3. CONNECTED COMPONENTS — keep only the largest ---
+    const labels = new Int32Array(sw * sh);
+    labels.fill(-1);
+    const components = []; // [{size, id}]
+    let nextLabel = 0;
 
-      const thicknessScore = area / perimeter;
-      const boxArea = rect.width * rect.height;
-      const fillRatio = boxArea > 0 ? area / boxArea : 0;
-      const score = area + thicknessScore * 1200 + fillRatio * 5000;
+    for (let i = 0; i < sw * sh; i++) {
+      if (mask[i] === 0 || labels[i] !== -1) continue;
+      const compId = nextLabel++;
+      let size = 0;
+      const queue = [i];
+      labels[i] = compId;
+      let head = 0;
+      while (head < queue.length) {
+        const ci = queue[head++];
+        size++;
+        const cx = ci % sw, cy = (ci - cx) / sw;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx, ny = cy + dy;
+            if (nx < 0 || nx >= sw || ny < 0 || ny >= sh) continue;
+            const ni = ny * sw + nx;
+            if (mask[ni] === 1 && labels[ni] === -1) {
+              labels[ni] = compId;
+              queue.push(ni);
+            }
+          }
+        }
+      }
+      components.push({ id: compId, size });
+    }
 
+    if (components.length === 0) {
+      throw new Error("트랙처럼 보이는 선을 찾지 못했습니다.");
+    }
+
+    // Pick the component that has the largest bounding-box diagonal * area product
+    // (this favours the track which spans the image over small blobs like text)
+    let bestComp = components[0];
+    let bestScore = -1;
+    for (const comp of components) {
+      // compute bounding box
+      let minX = sw, minY = sh, maxX = 0, maxY = 0;
+      for (let i = 0; i < sw * sh; i++) {
+        if (labels[i] !== comp.id) continue;
+        const x = i % sw, y = (i - x) / sw;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      const diag = Math.hypot(maxX - minX, maxY - minY);
+      const score = diag * comp.size;
       if (score > bestScore) {
         bestScore = score;
-        bestIndex = index;
+        bestComp = comp;
       }
     }
 
-    return bestIndex;
-  }
-
-  extractCenterline(mask, offsetX, offsetY) {
-    const skeleton = this.skeletonizeBinary(mask);
-
-    try {
-      let pixels = this.collectSkeletonPixels(skeleton, offsetX, offsetY);
-      if (pixels.length < 2) return [];
-
-      let graph = this.buildNeighborGraph(pixels);
-      ({ points: pixels, graph } = this.pruneShortBranches(pixels, graph));
-
-      const orderedPath = this.hasEndpoints(graph)
-        ? this.extractLongestOpenPath(pixels, graph)
-        : this.traceLoopPath(pixels, graph);
-
-      if (orderedPath.length < 2) return [];
-
-      const smoothed = smoothPolyline(orderedPath, 2, 2);
-      const totalLength = polylineLength(smoothed);
-      const sampleCount = clamp(Math.round(totalLength / 14), 28, 160);
-
-      return resamplePolyline(smoothed, sampleCount);
-    } finally {
-      skeleton.delete();
+    // Zero out non-track pixels
+    for (let i = 0; i < sw * sh; i++) {
+      if (labels[i] !== bestComp.id) mask[i] = 0;
     }
-  }
 
-  skeletonizeBinary(mask) {
-    const cv = globalThis.cv;
-    const working = mask.clone();
-    const skeleton = cv.Mat.zeros(mask.rows, mask.cols, cv.CV_8UC1);
-    const eroded = new cv.Mat();
-    const opened = new cv.Mat();
-    const residue = new cv.Mat();
-    const kernel = cv.getStructuringElement(cv.MORPH_CROSS, new cv.Size(3, 3));
-
-    try {
-      while (cv.countNonZero(working) > 0) {
-        cv.erode(working, eroded, kernel);
-        cv.dilate(eroded, opened, kernel);
-        cv.subtract(working, opened, residue);
-        cv.bitwise_or(skeleton, residue, skeleton);
-        eroded.copyTo(working);
+    // --- 4. DISTANCE TRANSFORM (Chamfer 3-4 approximation) ---
+    const dist = new Float32Array(sw * sh);
+    // forward pass
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const i = y * sw + x;
+        if (mask[i] === 0) { dist[i] = 0; continue; }
+        let d = 1e9;
+        if (y > 0) d = Math.min(d, dist[(y - 1) * sw + x] + 3);
+        if (x > 0) d = Math.min(d, dist[y * sw + x - 1] + 3);
+        if (x > 0 && y > 0) d = Math.min(d, dist[(y - 1) * sw + x - 1] + 4);
+        if (x < sw - 1 && y > 0) d = Math.min(d, dist[(y - 1) * sw + x + 1] + 4);
+        dist[i] = d;
       }
-
-      return skeleton;
-    } finally {
-      working.delete();
-      eroded.delete();
-      opened.delete();
-      residue.delete();
-      kernel.delete();
     }
-  }
+    // backward pass
+    for (let y = sh - 1; y >= 0; y--) {
+      for (let x = sw - 1; x >= 0; x--) {
+        const i = y * sw + x;
+        if (mask[i] === 0) continue;
+        let d = dist[i];
+        if (y < sh - 1) d = Math.min(d, dist[(y + 1) * sw + x] + 3);
+        if (x < sw - 1) d = Math.min(d, dist[y * sw + x + 1] + 3);
+        if (x < sw - 1 && y < sh - 1) d = Math.min(d, dist[(y + 1) * sw + x + 1] + 4);
+        if (x > 0 && y < sh - 1) d = Math.min(d, dist[(y + 1) * sw + x - 1] + 4);
+        dist[i] = d;
+      }
+    }
 
-  collectSkeletonPixels(skeleton, offsetX, offsetY) {
-    const pixels = [];
-
-    for (let y = 0; y < skeleton.rows; y += 1) {
-      for (let x = 0; x < skeleton.cols; x += 1) {
-        if (skeleton.ucharPtr(y, x)[0] > 0) {
-          pixels.push({ x: x + offsetX, y: y + offsetY });
+    // --- 5. RIDGE EXTRACTION — local maxima of distance field ---
+    const RIDGE_RADIUS = 2;
+    const ridgePixels = [];
+    for (let y = RIDGE_RADIUS; y < sh - RIDGE_RADIUS; y++) {
+      for (let x = RIDGE_RADIUS; x < sw - RIDGE_RADIUS; x++) {
+        const i = y * sw + x;
+        if (mask[i] === 0) continue;
+        const val = dist[i];
+        if (val < 4) continue; // skip thin features (text, noise)
+        let isMax = true;
+        outer:
+        for (let dy = -RIDGE_RADIUS; dy <= RIDGE_RADIUS; dy++) {
+          for (let dx = -RIDGE_RADIUS; dx <= RIDGE_RADIUS; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            if (dist[(y + dy) * sw + (x + dx)] > val) { isMax = false; break outer; }
+          }
+        }
+        if (isMax) {
+          ridgePixels.push({ x, y });
         }
       }
     }
 
-    return pixels;
+    if (ridgePixels.length < 3) {
+      throw new Error("트랙 중심선을 추출하지 못했습니다. 이미지에 굵은 검정 선이 있는지 확인해주세요.");
+    }
+
+    // --- 6. ORDER ridge pixels into a path (greedy nearest-neighbor) ---
+    const ordered = this._orderByNearest(ridgePixels);
+
+    // Map back to original coordinates
+    const rawPath = ordered.map(p => ({
+      x: p.x * scale,
+      y: p.y * scale,
+    }));
+
+    // --- 7. SMOOTH & RESAMPLE ---
+    const smoothed = smoothPolyline(rawPath, 3, 3);
+    const totalLength = polylineLength(smoothed);
+    const spacing = clamp(density, 10, 120);
+    const sampleCount = clamp(Math.round(totalLength / spacing), 12, 200);
+    const trackPoints = resamplePolyline(smoothed, sampleCount);
+
+    return { trackPoints };
   }
 
-  buildNeighborGraph(points) {
-    const pointIndexByKey = new Map();
-
-    points.forEach((point, index) => {
-      pointIndexByKey.set(`${point.x},${point.y}`, index);
-    });
-
-    return points.map((point) => {
-      const neighbors = [];
-
-      for (const [dx, dy] of NEIGHBOR_OFFSETS) {
-        const neighborIndex = pointIndexByKey.get(
-          `${point.x + dx},${point.y + dy}`,
-        );
-        if (neighborIndex !== undefined) neighbors.push(neighborIndex);
-      }
-
-      return neighbors;
-    });
-  }
-
-  pruneShortBranches(points, graph, maxBranchLength = 20) {
-    const removed = new Set();
-    let changed = true;
-
-    const getActiveNeighbors = (index) =>
-      graph[index].filter((neighborIndex) => !removed.has(neighborIndex));
-
-    while (changed) {
-      changed = false;
-
-      for (let startIndex = 0; startIndex < points.length; startIndex += 1) {
-        if (removed.has(startIndex)) continue;
-        if (getActiveNeighbors(startIndex).length !== 1) continue;
-
-        const branch = [startIndex];
-        let branchLength = 0;
-        let previousIndex = -1;
-        let currentIndex = startIndex;
-        let reachedJunction = false;
-
-        while (true) {
-          const options = getActiveNeighbors(currentIndex).filter(
-            (neighborIndex) => neighborIndex !== previousIndex,
-          );
-
-          if (!options.length) break;
-
-          const nextIndex = options[0];
-          branchLength += distance(points[currentIndex], points[nextIndex]);
-          branch.push(nextIndex);
-          previousIndex = currentIndex;
-          currentIndex = nextIndex;
-
-          const degree = getActiveNeighbors(currentIndex).length;
-
-          if (degree === 1) {
-            reachedJunction = false;
-            break;
-          }
-
-          if (degree > 2) {
-            reachedJunction = true;
-            break;
+  /** Dilate binary mask (1-pixel, 8-connected) in-place */
+  _dilate(mask, w, h) {
+    const copy = new Uint8Array(mask);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        if (copy[y * w + x]) continue;
+        let hit = false;
+        for (let dy = -1; dy <= 1 && !hit; dy++) {
+          for (let dx = -1; dx <= 1 && !hit; dx++) {
+            if (copy[(y + dy) * w + (x + dx)]) hit = true;
           }
         }
+        if (hit) mask[y * w + x] = 1;
+      }
+    }
+  }
 
-        if (reachedJunction && branchLength <= maxBranchLength) {
-          for (const branchIndex of branch.slice(0, -1)) {
-            removed.add(branchIndex);
+  /** Erode binary mask (1-pixel, 8-connected) in-place */
+  _erode(mask, w, h) {
+    const copy = new Uint8Array(mask);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        if (!copy[y * w + x]) continue;
+        let allSet = true;
+        for (let dy = -1; dy <= 1 && allSet; dy++) {
+          for (let dx = -1; dx <= 1 && allSet; dx++) {
+            if (!copy[(y + dy) * w + (x + dx)]) allSet = false;
           }
-          changed = true;
+        }
+        if (!allSet) mask[y * w + x] = 0;
+      }
+    }
+  }
+
+  /** Greedy nearest-neighbor ordering of 2D points */
+  _orderByNearest(points) {
+    if (points.length <= 2) return [...points];
+
+    const n = points.length;
+    const used = new Uint8Array(n);
+    const result = [];
+
+    // Start from the point with the smallest x (leftmost)
+    let startIdx = 0;
+    for (let i = 1; i < n; i++) {
+      if (points[i].x < points[startIdx].x ||
+          (points[i].x === points[startIdx].x && points[i].y < points[startIdx].y)) {
+        startIdx = i;
+      }
+    }
+
+    used[startIdx] = 1;
+    result.push(points[startIdx]);
+
+    for (let step = 1; step < n; step++) {
+      const last = result[result.length - 1];
+      let bestDist = Infinity;
+      let bestIdx = -1;
+      for (let i = 0; i < n; i++) {
+        if (used[i]) continue;
+        const d = (points[i].x - last.x) ** 2 + (points[i].y - last.y) ** 2;
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
         }
       }
+      if (bestIdx === -1) break;
+      // Stop if the next nearest point is very far away (disconnected cluster)
+      if (bestDist > 400) break;  // 20px gap max at working resolution
+      used[bestIdx] = 1;
+      result.push(points[bestIdx]);
     }
 
-    const activePoints = [];
-    const remappedIndexes = new Map();
-
-    points.forEach((point, index) => {
-      if (removed.has(index)) return;
-      remappedIndexes.set(index, activePoints.length);
-      activePoints.push(point);
-    });
-
-    const activeGraph = activePoints.map(() => []);
-
-    graph.forEach((neighbors, originalIndex) => {
-      if (removed.has(originalIndex)) return;
-
-      const mappedIndex = remappedIndexes.get(originalIndex);
-      activeGraph[mappedIndex] = neighbors
-        .filter((neighborIndex) => !removed.has(neighborIndex))
-        .map((neighborIndex) => remappedIndexes.get(neighborIndex));
-    });
-
-    return { points: activePoints, graph: activeGraph };
-  }
-
-  hasEndpoints(graph) {
-    return graph.some((neighbors) => neighbors.length === 1);
-  }
-
-  extractLongestOpenPath(points, graph) {
-    const startIndex = graph.findIndex((neighbors) => neighbors.length === 1);
-    if (startIndex === -1) return [];
-
-    const firstPass = this.findFarthestNode(startIndex, graph);
-    const secondPass = this.findFarthestNode(firstPass.index, graph);
-    const orderedIndexes = [];
-
-    let cursor = secondPass.index;
-
-    while (cursor !== -1) {
-      orderedIndexes.push(cursor);
-      if (cursor === firstPass.index) break;
-      cursor = secondPass.parent[cursor];
-    }
-
-    orderedIndexes.reverse();
-    return orderedIndexes.map((index) => points[index]);
-  }
-
-  findFarthestNode(startIndex, graph) {
-    const queue = new Int32Array(graph.length);
-    const visited = new Int8Array(graph.length);
-    const parent = new Int32Array(graph.length);
-    parent.fill(-1);
-
-    let head = 0;
-    let tail = 0;
-    let farthestIndex = startIndex;
-
-    queue[tail] = startIndex;
-    tail += 1;
-    visited[startIndex] = 1;
-
-    while (head < tail) {
-      const currentIndex = queue[head];
-      head += 1;
-      farthestIndex = currentIndex;
-
-      for (const neighborIndex of graph[currentIndex]) {
-        if (visited[neighborIndex]) continue;
-        visited[neighborIndex] = 1;
-        parent[neighborIndex] = currentIndex;
-        queue[tail] = neighborIndex;
-        tail += 1;
-      }
-    }
-
-    return { index: farthestIndex, parent };
-  }
-
-  traceLoopPath(points, graph) {
-    if (!points.length) return [];
-
-    let startIndex = 0;
-
-    for (let index = 1; index < points.length; index += 1) {
-      if (
-        points[index].x < points[startIndex].x ||
-        (points[index].x === points[startIndex].x &&
-          points[index].y < points[startIndex].y)
-      ) {
-        startIndex = index;
-      }
-    }
-
-    const orderedIndexes = [startIndex];
-    const visitedEdges = new Set();
-    let previousIndex = -1;
-    let currentIndex = startIndex;
-
-    while (true) {
-      const candidates = graph[currentIndex].filter(
-        (neighborIndex) =>
-          !visitedEdges.has(this.getEdgeKey(currentIndex, neighborIndex)),
-      );
-
-      if (!candidates.length) break;
-
-      const nextIndex = this.chooseBestNextIndex(
-        points,
-        previousIndex,
-        currentIndex,
-        candidates,
-      );
-
-      visitedEdges.add(this.getEdgeKey(currentIndex, nextIndex));
-
-      if (nextIndex === startIndex) break;
-
-      orderedIndexes.push(nextIndex);
-      previousIndex = currentIndex;
-      currentIndex = nextIndex;
-
-      if (orderedIndexes.length > points.length + 1) break;
-    }
-
-    return orderedIndexes.map((index) => points[index]);
-  }
-
-  chooseBestNextIndex(points, previousIndex, currentIndex, candidates) {
-    if (candidates.length === 1) return candidates[0];
-
-    if (previousIndex === -1) {
-      return [...candidates].sort((leftIndex, rightIndex) => {
-        const left = points[leftIndex];
-        const right = points[rightIndex];
-        if (left.y !== right.y) return left.y - right.y;
-        return left.x - right.x;
-      })[0];
-    }
-
-    const currentPoint = points[currentIndex];
-    const previousPoint = points[previousIndex];
-    const inputVector = {
-      x: currentPoint.x - previousPoint.x,
-      y: currentPoint.y - previousPoint.y,
-    };
-    const inputLength = Math.hypot(inputVector.x, inputVector.y) || 1;
-
-    let bestIndex = candidates[0];
-    let bestScore = -Infinity;
-
-    for (const candidateIndex of candidates) {
-      const candidatePoint = points[candidateIndex];
-      const outputVector = {
-        x: candidatePoint.x - currentPoint.x,
-        y: candidatePoint.y - currentPoint.y,
-      };
-      const outputLength = Math.hypot(outputVector.x, outputVector.y) || 1;
-      const score =
-        (inputVector.x * outputVector.x + inputVector.y * outputVector.y) /
-        (inputLength * outputLength);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = candidateIndex;
-      }
-    }
-
-    return bestIndex;
-  }
-
-  getEdgeKey(a, b) {
-    return a < b ? `${a}:${b}` : `${b}:${a}`;
+    return result;
   }
 }

@@ -10,16 +10,11 @@ import {
 
 export class PathPlanningService {
   createControlPointsFromDetectedTrack(trackPoints) {
-    if (trackPoints.length < 3) return clonePoints(trackPoints);
-
-    const smoothedTrack = smoothPolyline(trackPoints, 2, 2);
-    const totalLength = polylineLength(smoothedTrack);
-    const controlCount = clamp(Math.round(totalLength / 60), 10, 28);
-
-    return resamplePolyline(smoothedTrack, controlCount);
+    // Return all detected track points directly so they perfectly match the detection density
+    return clonePoints(trackPoints);
   }
 
-  buildPaths(controlPoints, vehicleConfig) {
+  buildPaths(controlPoints, vehicleConfig, { density = 40 } = {}) {
     if (controlPoints.length < 2) {
       return {
         smoothPath: clonePoints(controlPoints),
@@ -27,12 +22,15 @@ export class PathPlanningService {
       };
     }
 
-    const smoothPath = catmullRomSpline(controlPoints, 30);
+    // density slider: low value = dense (many points), high value = sparse
+    const samplesPerSeg = clamp(Math.round(120 / Math.max(density, 5)), 10, 80);
+
+    const smoothPath = catmullRomSpline(controlPoints, samplesPerSeg);
     const optimizedControls = this.buildOptimizedControlPoints(
       controlPoints,
       vehicleConfig,
     );
-    const optimizedPath = catmullRomSpline(optimizedControls, 30);
+    const optimizedPath = catmullRomSpline(optimizedControls, samplesPerSeg);
 
     return { smoothPath, optimizedPath };
   }

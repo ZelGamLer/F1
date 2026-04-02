@@ -39,6 +39,7 @@ class AppController {
       "mass",
       "brakePower",
       "accelPower",
+      "density",
     ];
 
     sliderIds.forEach((id) => {
@@ -65,8 +66,8 @@ class AppController {
 
   updateCvStatus() {
     this.elements.cvStatus.textContent = this.detector.isReady()
-      ? "OpenCV.js ready"
-      : "OpenCV.js loading";
+      ? "✅ 준비 완료"
+      : "⏳ 로딩 중…";
   }
 
   setStatus(message) {
@@ -100,6 +101,7 @@ class AppController {
     this.elements.massVal.textContent = Number(this.elements.mass.value).toFixed(0);
     this.elements.brakePowerVal.textContent = Number(this.elements.brakePower.value).toFixed(1);
     this.elements.accelPowerVal.textContent = Number(this.elements.accelPower.value).toFixed(1);
+    this.elements.densityVal.textContent = Number(this.elements.density.value).toFixed(0);
     this.elements.muEffVal.textContent = this.getEffectiveMu().toFixed(2);
     this.elements.apexCoordVal.textContent = this.state.apexPoint
       ? `(${this.state.apexPoint.x.toFixed(1)}, ${this.state.apexPoint.y.toFixed(1)})`
@@ -138,7 +140,7 @@ class AppController {
     }
 
     if (!String(file.type || "").startsWith("image/")) {
-      this.setStatus("The selected file is not a supported image.");
+      this.setStatus("지원하지 않는 파일 형식입니다. 이미지 파일을 선택해주세요.");
       this.elements.fileInput.value = "";
       return;
     }
@@ -151,7 +153,7 @@ class AppController {
       const height = image.height || image.naturalHeight;
 
       if (!width || !height) {
-        throw new Error("The browser could not read the image size.");
+        throw new Error("브라우저가 이미지 크기를 읽지 못했습니다.");
       }
 
       this.renderer.resize(width, height);
@@ -165,11 +167,11 @@ class AppController {
       this.stopAnimation();
       this.render();
       this.setStatus(
-        `Image loaded: ${file.name}. Add manual points or run auto detection.`,
+        `이미지 로드 완료: ${file.name}. 수동으로 점을 추가하거나 자동 검출을 실행하세요.`,
       );
     } catch (error) {
       this.render();
-      this.setStatus(error.message || "Failed to load the image.");
+      this.setStatus(error.message || "이미지 로드에 실패했습니다.");
     } finally {
       if (image && typeof image.close === "function") {
         image.close();
@@ -242,7 +244,7 @@ class AppController {
 
   handleCanvasClick(event) {
     if (!this.state.originalImage) {
-      this.setStatus("Load an image before placing control points.");
+      this.setStatus("먼저 이미지를 로드한 뒤 기준점을 찍어주세요.");
       return;
     }
 
@@ -253,49 +255,49 @@ class AppController {
     this.stopAnimation();
     this.state.addUserPoint({ x, y });
     this.render();
-    this.setStatus(`Manual control points: ${this.state.userPoints.length}`);
+    this.setStatus(`수동 기준점: ${this.state.userPoints.length}개`);
   }
 
   handleUndoPoint() {
     if (!this.state.removeLastUserPoint()) {
-      this.setStatus("There is no point to remove.");
+      this.setStatus("취소할 점이 없습니다.");
       return;
     }
 
     this.stopAnimation();
     this.render();
-    this.setStatus(`Last point removed. Remaining points: ${this.state.userPoints.length}`);
+    this.setStatus(`마지막 점 제거됨. 남은 점: ${this.state.userPoints.length}개`);
   }
 
   handleClearAll() {
     this.stopAnimation();
     this.state.clearAllTrackData();
     this.render();
-    this.setStatus("Detected track, control points, and driving line were cleared.");
+    this.setStatus("감지된 트랙, 기준점, 주행 라인이 모두 지워졌습니다.");
   }
 
   handleClearDetectedTrack() {
     this.state.clearDetectedTrack();
     this.render();
-    this.setStatus("Auto detected track overlay was removed.");
+    this.setStatus("자동 검출 오버레이가 제거되었습니다.");
   }
 
   handleGenerateLine() {
     if (this.state.userPoints.length < 3) {
-      this.setStatus("At least 3 control points are required to build a driving line.");
+      this.setStatus("주행 라인을 생성하려면 최소 3개의 기준점이 필요합니다.");
       return;
     }
 
     this.buildAndAnalyzePath({
       showStatus: true,
-      statusMessage: "Driving line and analysis were rebuilt from the current control points.",
+      statusMessage: "현재 기준점으로 주행 라인 및 분석을 다시 생성했습니다.",
     });
   }
 
   handleAnalyzeOnly() {
     const activePath = this.state.getActivePath();
     if (activePath.length < 3) {
-      this.setStatus("Build a driving line first.");
+      this.setStatus("먼저 주행 라인을 생성해주세요.");
       return;
     }
 
@@ -305,27 +307,28 @@ class AppController {
 
     if (analysis.apexPoint) {
       this.setStatus(
-        `Apex updated: (${analysis.apexPoint.x.toFixed(1)}, ${analysis.apexPoint.y.toFixed(1)})`,
+        `에이펙스 갱신됨: (${analysis.apexPoint.x.toFixed(1)}, ${analysis.apexPoint.y.toFixed(1)})`,
       );
       return;
     }
 
-    this.setStatus("Apex could not be found.");
+    this.setStatus("에이펙스를 찾을 수 없습니다.");
   }
 
   handleAutoDetect() {
     if (!this.detector.isReady()) {
-      this.setStatus("OpenCV.js is still loading. Please try again in a moment.");
+      this.setStatus("아직 준비 중입니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
     if (!this.state.originalImage) {
-      this.setStatus("Load an image before running auto detection.");
+      this.setStatus("먼저 이미지를 로드해주세요.");
       return;
     }
 
     try {
-      const { trackPoints } = this.detector.detect(this.sourceCanvas);
+      const density = Number(this.elements.density.value) || 40;
+      const { trackPoints } = this.detector.detect(this.sourceCanvas, { density });
       const controlPoints = this.planner.createControlPointsFromDetectedTrack(trackPoints);
 
       this.stopAnimation();
@@ -334,17 +337,18 @@ class AppController {
 
       this.buildAndAnalyzePath({
         showStatus: true,
-        statusMessage: `Auto detection covered ${trackPoints.length} track points and generated ${controlPoints.length} driving-line control points.`,
+        statusMessage: `자동 검출 완료! 트랙 포인트 ${trackPoints.length}개 → 주행 라인 기준점 ${controlPoints.length}개 생성됨`,
       });
     } catch (error) {
       this.render();
-      this.setStatus(error.message || "Auto detection failed.");
+      this.setStatus(error.message || "자동 검출에 실패했습니다.");
     }
   }
 
   buildAndAnalyzePath({ showStatus, statusMessage }) {
     const vehicleConfig = this.getVehicleConfig();
-    const generatedPaths = this.planner.buildPaths(this.state.userPoints, vehicleConfig);
+    const density = Number(this.elements.density.value) || 40;
+    const generatedPaths = this.planner.buildPaths(this.state.userPoints, vehicleConfig, { density });
     this.state.setGeneratedPaths(generatedPaths);
 
     const analysis = this.analyzer.analyze(this.state.getActivePath(), vehicleConfig);
@@ -359,27 +363,27 @@ class AppController {
   handlePlay() {
     const activePath = this.state.getActivePath();
     if (activePath.length < 2 || this.state.speedProfile.length !== activePath.length) {
-      this.setStatus("Build and analyze the driving line first.");
+      this.setStatus("먼저 주행 라인을 생성하고 분석해주세요.");
       return;
     }
 
     this.stopAnimation();
     this.isPlaying = true;
     this.animateCar();
-    this.setStatus("Animation started.");
+    this.setStatus("애니메이션이 시작되었습니다.");
   }
 
   handlePause() {
     this.stopAnimation();
     this.render();
-    this.setStatus("Animation paused.");
+    this.setStatus("애니메이션이 일시정지되었습니다.");
   }
 
   handleResetCar() {
     this.stopAnimation();
     this.state.resetCar();
     this.render();
-    this.setStatus("Car position was reset to the start.");
+    this.setStatus("차량 위치가 출발점으로 초기화되었습니다.");
   }
 
   animateCar() {
@@ -398,7 +402,7 @@ class AppController {
     if (this.state.carIndex >= activePath.length - 1) {
       this.stopAnimation();
       this.render();
-      this.setStatus("Animation finished.");
+      this.setStatus("애니메이션이 완료되었습니다.");
       return;
     }
 
@@ -455,6 +459,8 @@ function createElements() {
     accelPower: document.getElementById("accelPower"),
     tireState: document.getElementById("tireState"),
     surfaceState: document.getElementById("surfaceState"),
+    density: document.getElementById("density"),
+    densityVal: document.getElementById("densityVal"),
     muVal: document.getElementById("muVal"),
     downforceVal: document.getElementById("downforceVal"),
     initialSpeedVal: document.getElementById("initialSpeedVal"),

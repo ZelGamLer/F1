@@ -24,7 +24,7 @@ export class CanvasRenderer {
   drawMainCanvas(state) {
     this.drawImageLayer(this.mainContext, this.canvas, state.originalImage);
     this.drawDetectedTrack(this.mainContext, state.detectedTrackPoints);
-    this.drawPath(this.mainContext, state.getActivePath(), "#ff00aa", 4);
+    this.drawPath(this.mainContext, state.getActivePath(), "#e879f9", 5);
     this.drawControlPoints(this.mainContext, state.userPoints);
     this.drawApex(this.mainContext, state.apexPoint);
     this.drawCar(this.mainContext, state);
@@ -32,7 +32,7 @@ export class CanvasRenderer {
 
   drawLineCanvas(state) {
     this.drawImageLayer(this.lineContext, this.lineCanvas, state.originalImage);
-    this.drawPath(this.lineContext, state.getActivePath(), "#ff00aa", 4);
+    this.drawPath(this.lineContext, state.getActivePath(), "#e879f9", 5);
     this.drawApex(this.lineContext, state.apexPoint);
     this.drawCar(this.lineContext, state);
   }
@@ -63,8 +63,16 @@ export class CanvasRenderer {
     if (!points.length) return;
 
     context.save();
-    context.strokeStyle = "rgba(0, 188, 212, 0.75)";
-    context.lineWidth = 2.5;
+
+    // Glow effect
+    context.shadowColor = "#06b6d4";
+    context.shadowBlur = 8;
+
+    // Thick vibrant cyan line
+    context.strokeStyle = "#06b6d4";
+    context.lineWidth = 5;
+    context.lineJoin = "round";
+    context.lineCap = "round";
     context.beginPath();
     context.moveTo(points[0].x, points[0].y);
 
@@ -74,12 +82,21 @@ export class CanvasRenderer {
 
     context.stroke();
 
-    const radius = points.length > 60 ? 2.5 : points.length > 24 ? 3 : 4;
-    context.fillStyle = "#00bcd4";
+    // Draw bright visible dots
+    context.shadowBlur = 4;
+    const radius = 6;
 
     for (const point of points) {
+      // Outer ring
+      context.fillStyle = "#06b6d4";
       context.beginPath();
       context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      context.fill();
+
+      // Inner white dot
+      context.fillStyle = "#ffffff";
+      context.beginPath();
+      context.arc(point.x, point.y, radius * 0.45, 0, Math.PI * 2);
       context.fill();
     }
 
@@ -90,8 +107,15 @@ export class CanvasRenderer {
     if (!points.length) return;
 
     context.save();
-    context.strokeStyle = "#32d74b";
-    context.lineWidth = 2;
+
+    // Glow
+    context.shadowColor = "#10b981";
+    context.shadowBlur = 6;
+
+    context.strokeStyle = "#10b981";
+    context.lineWidth = 4;
+    context.lineJoin = "round";
+    context.lineCap = "round";
     context.beginPath();
     context.moveTo(points[0].x, points[0].y);
 
@@ -100,11 +124,24 @@ export class CanvasRenderer {
     }
 
     context.stroke();
-    context.fillStyle = "#ef4444";
 
+    // Draw points with ring effect
     points.forEach((point, index) => {
+      const r = index === 0 ? 9 : 7;
+
+      // Outer ring
+      context.fillStyle = "#ef4444";
+      context.shadowColor = "#ef4444";
+      context.shadowBlur = 6;
       context.beginPath();
-      context.arc(point.x, point.y, index === 0 ? 5 : 4, 0, Math.PI * 2);
+      context.arc(point.x, point.y, r, 0, Math.PI * 2);
+      context.fill();
+
+      // Inner white
+      context.shadowBlur = 0;
+      context.fillStyle = "#ffffff";
+      context.beginPath();
+      context.arc(point.x, point.y, r * 0.4, 0, Math.PI * 2);
       context.fill();
     });
 
@@ -117,6 +154,10 @@ export class CanvasRenderer {
     context.save();
     context.strokeStyle = strokeStyle;
     context.lineWidth = lineWidth;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    context.shadowColor = strokeStyle;
+    context.shadowBlur = 6;
     context.beginPath();
     context.moveTo(path[0].x, path[0].y);
 
@@ -132,17 +173,22 @@ export class CanvasRenderer {
     if (path.length < 2 || segmentTypes.length !== path.length - 1) return;
 
     context.save();
-    context.lineWidth = 5;
+    context.lineWidth = 6;
+    context.lineJoin = "round";
+    context.lineCap = "round";
 
     for (let index = 0; index < path.length - 1; index += 1) {
       const segmentType = segmentTypes[index];
-      context.strokeStyle =
+      const color =
         segmentType === "accelerate"
-          ? "#2e7d32"
+          ? "#10b981"
           : segmentType === "brake"
-            ? "#c62828"
-            : "#f9a825";
+            ? "#ef4444"
+            : "#f59e0b";
 
+      context.strokeStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 4;
       context.beginPath();
       context.moveTo(path[index].x, path[index].y);
       context.lineTo(path[index + 1].x, path[index + 1].y);
@@ -156,9 +202,17 @@ export class CanvasRenderer {
     if (!apexPoint) return;
 
     context.save();
-    context.fillStyle = "#1565c0";
+    context.shadowColor = "#3b82f6";
+    context.shadowBlur = 10;
+    context.fillStyle = "#3b82f6";
     context.beginPath();
-    context.arc(apexPoint.x, apexPoint.y, 6, 0, Math.PI * 2);
+    context.arc(apexPoint.x, apexPoint.y, 8, 0, Math.PI * 2);
+    context.fill();
+
+    context.shadowBlur = 0;
+    context.fillStyle = "#ffffff";
+    context.beginPath();
+    context.arc(apexPoint.x, apexPoint.y, 3, 0, Math.PI * 2);
     context.fill();
     context.restore();
   }
@@ -180,12 +234,18 @@ export class CanvasRenderer {
     }
 
     context.save();
-    context.fillStyle = "#111827";
+    context.shadowColor = "#e879f9";
+    context.shadowBlur = 10;
+    context.fillStyle = "#e879f9";
+    context.beginPath();
+    context.arc(carPoint.x, carPoint.y, 8, 0, Math.PI * 2);
+    context.fill();
+
+    context.shadowBlur = 0;
     context.strokeStyle = "#ffffff";
     context.lineWidth = 2;
     context.beginPath();
-    context.arc(carPoint.x, carPoint.y, 7, 0, Math.PI * 2);
-    context.fill();
+    context.arc(carPoint.x, carPoint.y, 8, 0, Math.PI * 2);
     context.stroke();
     context.restore();
   }
